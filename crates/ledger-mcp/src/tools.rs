@@ -78,7 +78,10 @@ fn scan_for_full_numbers(args: &JsonObject) -> Result<(), ToolError> {
                 let f = if field == "entries" { format!("entry {}", i + 1) } else { field.to_string() };
                 walk(x, &f)
             }),
+            // Keys are scanned before they can become a field label or a serde "unknown field" echo.
             Value::Object(m) => m.iter().try_for_each(|(k, x)| {
+                let key_field = if field.is_empty() { "field name".to_string() } else { format!("field name in {field}") };
+                ledger_core::check_no_full_number(&key_field, k).map_err(ToolError::from)?;
                 let f = if field.is_empty() { k.clone() } else { format!("{k} of {field}") };
                 walk(x, &f)
             }),

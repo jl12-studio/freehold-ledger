@@ -602,6 +602,30 @@ async fn s_pan_7_no_tool_accepts_a_full_card_number() {
     client.cancel().await.ok();
 }
 
+#[tokio::test]
+async fn s_pan_7_full_number_as_a_field_name_is_refused_without_echo() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let cases = [
+        ("record_expense", json!({ "amount": "12", "description": "Pens", "category": "supplies", "4242424242424242": "x" })),
+        ("record_expense", json!({ "amount": "12", "description": "Pens", "category": "supplies", "4242 4242 4242 4242": "4111111111111111" })),
+        ("record_transactions", json!({ "label": "jan.csv", "entries": [
+            { "kind": "expense", "amount": "5", "description": "Coffee", "date": "2026-01-02", "category": "meals", "4242-4242-4242-4242": true }
+        ] })),
+        ("create_payment_method", json!({ "kind": "card", "nickname": "Visa", "4242424242424242": null })),
+    ];
+    for (tool, args) in cases {
+        let r = call(&client, tool, args).await;
+        assert!(is_error(&r), "{tool} accepted a card number as a field name");
+        let t = text(&r);
+        assert!(t.contains("last 4 digits") && t.contains("nothing was stored"), "{tool}: {t}");
+        assert!(!t.contains("4242") && !t.contains("4111"), "{tool} echoed the number: {t}");
+    }
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["transaction_count"], 0);
+    client.cancel().await.ok();
+}
+
 fn note(v: &Value) -> String {
     let n = v["note"].as_str().expect("note is text").to_string();
     assert!(!n.contains('\u{2014}'), "note has an em dash: {n}");
