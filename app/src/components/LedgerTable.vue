@@ -42,7 +42,7 @@ const th = "label border-b border-rule py-2 pr-4 font-[560]";
     <table class="w-full min-w-[42rem] table-fixed border-collapse text-left font-sans text-ui">
       <caption class="sr-only">Ledger entries</caption>
       <colgroup>
-        <col class="w-[6.5rem]" />
+        <col class="w-[7.75rem]" />
         <col />
         <col class="w-[10.5rem] lg:w-[12rem]" />
         <col class="w-[9.5rem] lg:w-[11rem]" />

@@ -43,6 +43,14 @@ describe("Ledger table", () => {
     expect(wrapper.get("table").classes()).toEqual(expect.arrayContaining(["table-fixed", "min-w-[42rem]"]));
   });
 
+  it("date_column_is_wide_enough_for_its_text_plus_the_cell_padding", async () => {
+    const wrapper = await launch();
+    const cols = wrapper.findAll("table colgroup col");
+    expect(cols).toHaveLength(5);
+    expect(cols[0].classes()).toContain("w-[7.75rem]");
+    expect(wrapper.get("tbody tr td").classes()).toEqual(expect.arrayContaining(["pr-4", "whitespace-nowrap"]));
+  });
+
   it("s_ui_19_cells_expense_row", async () => {
     const wrapper = await launch();
     const cells = rowFor(wrapper, 1).findAll("td");

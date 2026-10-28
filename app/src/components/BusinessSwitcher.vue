@@ -41,6 +41,6 @@ function onChange(e: Event) {
     <span v-else class="font-[560]">{{ selected?.name }}</span>
     <span v-if="selected?.is_test" class="chip chip-test">Test</span>
     <span v-if="selected?.archived" class="chip chip-muted">Archived</span>
-    <span class="label hidden truncate md:inline">{{ caption }}</span>
+    <span class="label hidden truncate md:inline" :title="caption">{{ caption }}</span>
   </div>
 </template>

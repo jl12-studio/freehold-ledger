@@ -138,6 +138,11 @@ describe("Ledger filters", () => {
     expect(clearAll(wrapper)).toHaveLength(0);
   });
 
+  it("category_select_stays_compact_instead_of_stretching_to_its_longest_label", async () => {
+    const wrapper = await launch();
+    expect(select(wrapper, "Category").classes()).toContain("max-w-[12rem]");
+  });
+
   it("selects_have_accessible_names_and_no_visible_field_labels", async () => {
     const wrapper = await launch();
     for (const name of ["Dates", "Category", "Source", "Payment method"]) {

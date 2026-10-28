@@ -48,7 +48,26 @@ describe("App header and footer (S-UI-17)", () => {
     expect(connect.text()).toBe("Connect your agent");
     expect(text).not.toContain("Show in Finder");
     expect(text).not.toContain("Ledger file");
-    expect(header.find("[title]").exists()).toBe(false);
+    for (const el of header.findAll("[title]")) expect(el.attributes("title")).not.toContain("/");
+  });
+
+  it("one_row_header_at_1100px_leaves_room_for_the_full_agent_caption", () => {
+    const wrapper = mount(AppHeader, {
+      props: { showExport: true, businesses, selectedId: 1, currentId: 1 },
+    });
+    const grid = wrapper.get("header > div");
+    expect(grid.classes()).toEqual(expect.arrayContaining(["lg:gap-x-4", "xl:gap-x-6"]));
+    const caption = wrapper.get("header span.label.truncate");
+    expect(caption.text()).toBe("Your agent records here");
+    expect(caption.attributes("title")).toBe("Your agent records here");
+  });
+
+  it("the_caption_names_the_other_business_in_full_in_its_title", () => {
+    const wrapper = mount(AppHeader, {
+      props: { showExport: true, businesses, selectedId: 2, currentId: 1 },
+    });
+    const caption = wrapper.get("header span.label.truncate");
+    expect(caption.attributes("title")).toBe(`Your agent records in ${businesses[0].name}`);
   });
 
   it("s_ui_17d_brand_mark_is_decorative", () => {

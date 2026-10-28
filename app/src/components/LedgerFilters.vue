@@ -111,7 +111,7 @@ const active = (v: string) => (v !== "" ? "true" : undefined);
 
     <select
       aria-label="Category"
-      class="control"
+      class="control max-w-[12rem]"
       :data-active="active(modelValue.category)"
       :value="modelValue.category"
       @change="update({ category: ($event.target as HTMLSelectElement).value })"
