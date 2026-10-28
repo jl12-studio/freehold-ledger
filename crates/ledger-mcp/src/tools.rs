@@ -224,6 +224,8 @@ struct RecordExpenseInput {
     date: Option<String>,
     /// True for equipment or property kept longer than a year (a laptop, a camera, a tool). Defaults to false.
     is_asset: Option<bool>,
+    /// The card, account or cash it was paid with: nickname or id. Omit to use the default payment method, if one is set.
+    payment_method: Option<PaymentMethodArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -239,6 +241,8 @@ struct RecordIncomeInput {
     category: Option<String>,
     /// Date the money was received, YYYY-MM-DD. Omit for today.
     date: Option<String>,
+    /// The account or method the money came into: nickname or id. Omit for none; income never uses the default.
+    payment_method: Option<PaymentMethodArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -248,6 +252,8 @@ struct RecordTransactionsInput {
     label: String,
     /// 1 to 50 entries, in file order.
     entries: Vec<BatchEntryInput>,
+    /// Payment method for every entry in this batch, for example the card the statement is for. An entry's own payment_method wins. Expenses with neither use the default.
+    payment_method: Option<PaymentMethodArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -269,6 +275,8 @@ struct BatchEntryInput {
     source: Option<String>,
     /// Record this entry even if it matches one already in the books (a real second charge). Defaults to false.
     allow_duplicate: Option<bool>,
+    /// This entry's payment method, overriding the batch's.
+    payment_method: Option<PaymentMethodArg>,
 }
 
 /// An entry-level failure in the same words core uses for its own `BatchEntry` errors.
@@ -286,6 +294,7 @@ fn batch_entry(n: usize, e: BatchEntryInput) -> Result<ledger_core::BatchEntry, 
             "Amount must be more than $0.00. A refund or return is recorded by correcting the original purchase with correct_transaction, not as a negative amount.",
         ));
     }
+    let pm: Option<ledger_core::PaymentMethodKey> = e.payment_method.map(Into::into);
     let entry = match e.kind {
         KindArg::Expense => {
             let Some(category) = e.category else {
@@ -300,6 +309,7 @@ fn batch_entry(n: usize, e: BatchEntryInput) -> Result<ledger_core::BatchEntry, 
                 description: e.description,
                 category,
                 is_asset: e.is_asset.unwrap_or(false),
+                payment_method: pm.clone(),
             })
         }
         KindArg::Income => {
@@ -312,10 +322,11 @@ fn batch_entry(n: usize, e: BatchEntryInput) -> Result<ledger_core::BatchEntry, 
                 description: e.description,
                 category: e.category,
                 source: e.source.unwrap_or_default(),
+                payment_method: pm.clone(),
             })
         }
     };
-    Ok(ledger_core::BatchEntry { entry, allow_duplicate: e.allow_duplicate.unwrap_or(false) })
+    Ok(ledger_core::BatchEntry { entry, allow_duplicate: e.allow_duplicate.unwrap_or(false), payment_method: pm })
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -335,6 +346,8 @@ struct ListTransactionsInput {
     is_asset: Option<bool>,
     /// Only entries recorded in this batch (the batch_id from record_transactions).
     batch_id: Option<i64>,
+    /// Only entries on this payment method (nickname or id), or "none" for entries with no payment method.
+    payment_method: Option<PaymentMethodArg>,
     /// Also list voided entries, each with its void reason. Defaults to false.
     include_voided: Option<bool>,
     /// Most entries to return, newest first. Defaults to 50; the maximum is 500.
@@ -389,6 +402,17 @@ struct CorrectInput {
     is_asset: Option<bool>,
     /// New income source (income only).
     source: Option<String>,
+    /// New payment method: nickname or id. Omit to keep the original's.
+    payment_method: Option<PaymentMethodArg>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AssignPaymentMethodInput {
+    /// The payment method these entries were paid with: its nickname or id.
+    payment_method: PaymentMethodArg,
+    /// Ids of the entries, 1 to 200. list_transactions finds them.
+    ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -433,6 +457,8 @@ struct SummarizeInput {
     source: Option<String>,
     /// True for only assets (equipment kept over a year), false for only non-assets.
     is_asset: Option<bool>,
+    /// Only entries on this payment method (nickname or id), or "none" for entries with no payment method.
+    payment_method: Option<PaymentMethodArg>,
 }
 
 /// Add a dollar-formatted sibling for every `*_cents` number, for example `profit_cents` -> `profit`.
@@ -514,6 +540,38 @@ fn describe_method(nickname: &str, kind: ledger_core::PaymentKind, last4: Option
         kind.label().to_lowercase(),
         last4.map(|l| format!(" ending {l}")).unwrap_or_default()
     )
+}
+
+fn method_of(t: &ledger_core::Transaction) -> Option<String> {
+    t.payment_method.as_ref().map(|p| describe_method(&p.nickname, p.kind, p.last4.as_deref()))
+}
+
+/// The sentence every record and correct note ends with: which payment method was stored, or that none was.
+fn method_sentence(t: &ledger_core::Transaction, used_default: bool, kept: bool) -> String {
+    match method_of(t) {
+        Some(d) => {
+            let suffix = if used_default {
+                " (your default)"
+            } else if kept {
+                " (kept from the original)"
+            } else {
+                ""
+            };
+            format!(" Payment method: {d}{suffix}.")
+        }
+        None => " No payment method is set; say what it was paid with and I will add it.".to_string(),
+    }
+}
+
+/// A filter argument: "none" (any case) means entries without a payment method.
+fn filter_arg(l: &Ledger, a: PaymentMethodArg) -> Result<ledger_core::PaymentMethodFilter, ToolError> {
+    if let PaymentMethodArg::Nickname(s) = &a {
+        if s.trim().eq_ignore_ascii_case("none") {
+            return Ok(ledger_core::PaymentMethodFilter::Unassigned);
+        }
+    }
+    let key: ledger_core::PaymentMethodKey = a.into();
+    Ok(ledger_core::PaymentMethodFilter::Id(l.find_payment_method(&key)?.id))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -610,7 +668,9 @@ impl LedgerTools {
                 description: i.description,
                 category: i.category,
                 is_asset: i.is_asset.unwrap_or(false),
+                payment_method: i.payment_method.map(Into::into),
             };
+            let named = new.payment_method.is_some();
             let t = self.with_ledger(|l| Ok(l.record_expense(new)?))?;
             // The agent records with defaults instead of asking first, so every note names the
             // date and category that were actually stored, for the person to correct.
@@ -627,6 +687,7 @@ impl LedgerTools {
             } else {
                 format!("Recorded on {date} as {filed_under}: it counts toward your deductions for the year.")
             };
+            let note = format!("{note}{}", method_sentence(&t, !named && t.payment_method.is_some(), false));
             Ok(with_note(txn_json(&t), note))
         })())
     }
@@ -643,12 +704,14 @@ impl LedgerTools {
                 description: i.description,
                 category: i.category,
                 source: i.source,
+                payment_method: i.payment_method.map(Into::into),
             };
             let t = self.with_ledger(|l| Ok(l.record_income(new)?))?;
             let note = format!(
-                "Recorded as {}{}: income is reported for the year it was received, and the same source name is reused each time.",
+                "Recorded as {}{}: income is reported for the year it was received, and the same source name is reused each time.{}",
                 t.category_label,
-                t.schedule_c_line.as_deref().map(|l| format!(" (Schedule C line {l})")).unwrap_or_default()
+                t.schedule_c_line.as_deref().map(|l| format!(" (Schedule C line {l})")).unwrap_or_default(),
+                method_sentence(&t, false, false)
             );
             Ok(with_note(txn_json(&t), note))
         })())
@@ -673,7 +736,7 @@ impl LedgerTools {
                 .enumerate()
                 .map(|(idx, e)| batch_entry(idx + 1, e))
                 .collect::<Result<Vec<_>, _>>()?;
-            let r = self.with_ledger(|l| Ok(l.record_batch(ledger_core::NewBatch { label: i.label, entries })?))?;
+            let r = self.with_ledger(|l| Ok(l.record_batch(ledger_core::NewBatch { label: i.label, entries, payment_method: i.payment_method.map(Into::into) })?))?;
             let recorded: Vec<Value> = r
                 .recorded
                 .iter()
@@ -695,6 +758,21 @@ impl LedgerTools {
                 }));
             }
             let (rc, sc) = (recorded.len(), skipped.len());
+            let mut groups: Vec<(String, usize)> = Vec::new();
+            let mut none_count = 0;
+            for x in &r.recorded {
+                match &x.transaction.payment_method {
+                    Some(p) => match groups.iter_mut().find(|g| g.0 == p.nickname) {
+                        Some(g) => g.1 += 1,
+                        None => groups.push((p.nickname.clone(), 1)),
+                    },
+                    None => none_count += 1,
+                }
+            }
+            let mut parts: Vec<String> = groups.iter().map(|(n, c)| format!("{n} on {c}")).collect();
+            if none_count > 0 {
+                parts.push(format!("none on {none_count}"));
+            }
             let note = match r.batch_id {
                 Some(id) => {
                     let base = format!(
@@ -702,6 +780,7 @@ impl LedgerTools {
                         r.label
                     );
                     let base = format!("{base} To undo this whole batch, call void_batch with batch_id {id}.");
+                    let base = format!("{base} Payment methods: {}.", parts.join(", "));
                     if sc == 0 {
                         base
                     } else {
@@ -725,7 +804,7 @@ impl LedgerTools {
     }
 
     #[tool(
-        description = "List ledger entries, newest first, optionally filtered by date range, kind, category, income source, or asset flag. Voided entries are hidden unless include_voided is true. Use to answer 'what did I spend on...', to find an id before correcting something, or to review before tax time. Filter by batch_id to see one import.",
+        description = "List ledger entries, newest first, optionally filtered by date range, kind, category, income source, or asset flag. Voided entries are hidden unless include_voided is true. Use to answer 'what did I spend on...', to find an id before correcting something, or to review before tax time. Filter by batch_id to see one import. Filter by payment_method to see one card or account, or \"none\" for entries without one.",
         input_schema = schema_for_input::<ListTransactionsInput>().expect("schema"),
         annotations(read_only_hint = true)
     )]
@@ -737,6 +816,10 @@ impl LedgerTools {
             if !(1..=500).contains(&limit) {
                 return Err(ToolError::Input("limit must be between 1 and 500.".into()));
             }
+            let pm_filter = i
+                .payment_method
+                .map(|a| self.with_ledger(|l| filter_arg(l, a)))
+                .transpose()?;
             let filter = ledger_core::Filter {
                 from: parse_date_arg(&i.from)?,
                 to: parse_date_arg(&i.to)?,
@@ -745,6 +828,7 @@ impl LedgerTools {
                 source: i.source,
                 is_asset: i.is_asset,
                 batch_id: i.batch_id,
+                payment_method: pm_filter,
                 include_voided: i.include_voided.unwrap_or(false),
                 limit: Some(limit),
             };
@@ -829,7 +913,7 @@ impl LedgerTools {
     }
 
     #[tool(
-        description = "Fix a wrong amount, date, description, category, asset flag, or income source on an existing entry. The original is voided with your reason and a linked replacement is recorded in one step, so the history shows what changed. Give at least one field to change.",
+        description = "Fix a wrong amount, date, description, category, asset flag, income source, or payment method on an existing entry. The original is voided with your reason and a linked replacement is recorded in one step, so the history shows what changed. Give at least one field to change.",
         input_schema = schema_for_input::<CorrectInput>().expect("schema")
     )]
     fn correct_transaction(&self, args: JsonObject) -> CallToolResult {
@@ -841,9 +925,10 @@ impl LedgerTools {
                 && i.category.is_none()
                 && i.is_asset.is_none()
                 && i.source.is_none()
+                && i.payment_method.is_none()
             {
                 return Err(ToolError::Input(
-                    "Say what to change: give at least one of amount, date, description, category, is_asset or source.".into(),
+                    "Say what to change: give at least one of amount, date, description, category, is_asset, source or payment_method.".into(),
                 ));
             }
             let r = ledger_core::Replacement {
@@ -853,17 +938,22 @@ impl LedgerTools {
                 category: i.category,
                 is_asset: i.is_asset,
                 source: i.source,
+                payment_method: i.payment_method.map(Into::into),
             };
+            let named = r.payment_method.is_some();
             let c = self.with_ledger(|l| Ok(l.correct(i.id, &i.reason, r)?))?;
             Ok(with_note(
                 json!({ "voided": txn_json(&c.voided), "replacement": txn_json(&c.replacement) }),
-                "Corrected by voiding the original and recording a linked replacement, so the history shows exactly what changed and why.",
+                format!(
+                    "Corrected by voiding the original and recording a linked replacement, so the history shows exactly what changed and why.{}",
+                    method_sentence(&c.replacement, false, !named && c.replacement.payment_method.is_some())
+                ),
             ))
         })())
     }
 
     #[tool(
-        description = "Totals for a period: spending by tax category, income by source, profit. Use for 'what did I spend...', 'how much came in from...', 'how am I doing this quarter'. For equipment purchases use is_asset=true.",
+        description = "Totals for a period: spending by tax category, income by source, profit. Use for 'what did I spend...', 'how much came in from...', 'how am I doing this quarter'. For equipment purchases use is_asset=true. Results include totals by payment method; filter by payment_method for one card.",
         input_schema = schema_for_input::<SummarizeInput>().expect("schema"),
         annotations(read_only_hint = true)
     )]
@@ -882,12 +972,17 @@ impl LedgerTools {
                     ))
                 }
             };
+            let pm_filter = i
+                .payment_method
+                .map(|a| self.with_ledger(|l| filter_arg(l, a)))
+                .transpose()?;
             let req = ledger_core::SummaryRequest {
                 from,
                 to,
                 category: i.category,
                 source: i.source,
                 is_asset: i.is_asset,
+                payment_method: pm_filter,
             };
             let s = self.with_ledger(|l| Ok(l.summarize(&req)?))?;
             let mut v = serde_json::to_value(&s).expect("summary serializes");
@@ -940,6 +1035,41 @@ impl LedgerTools {
                     "folder": folder,
                     "files": r.files,
                     "totals": serde_json::to_value(&r.summary).expect("summary serializes"),
+                }),
+                note,
+            ))
+        })())
+    }
+
+    #[tool(
+        description = "Say which payment method one or more existing entries were paid with: give the payment method and the entry ids (1 to 200). Use for 'that was on my Visa' or 'everything in March was on the Amex': list_transactions finds the ids, for example by date range, or with payment_method \"none\" for entries that have no payment method yet. Each change is kept in the history. Voided entries cannot be changed.",
+        input_schema = schema_for_input::<AssignPaymentMethodInput>().expect("schema")
+    )]
+    fn assign_payment_method(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: AssignPaymentMethodInput = parse_args(args)?;
+            let key: ledger_core::PaymentMethodKey = i.payment_method.into();
+            let r = self.with_ledger(|l| Ok(l.assign_payment_method(&key, &i.ids)?))?;
+            let p = &r.payment_method;
+            let d = describe_method(&p.nickname, p.kind, p.last4.as_deref());
+            let (a, u) = (r.assigned.len(), r.unchanged_ids.len());
+            let note = if a == 0 {
+                format!("Nothing changed: all {u} entries were already on {d}.")
+            } else {
+                let mut n = format!("Put {a} entries on {d}.");
+                if u > 0 {
+                    n.push_str(&format!(" {u} were already on it and were left as they were."));
+                }
+                n.push_str(" Any earlier payment method stays in the history.");
+                n
+            };
+            Ok(with_note(
+                json!({
+                    "payment_method": serde_json::to_value(p).expect("payment method serializes"),
+                    "assigned_count": a,
+                    "unchanged_count": u,
+                    "assigned": r.assigned.iter().map(txn_json).collect::<Vec<Value>>(),
+                    "unchanged_ids": r.unchanged_ids,
                 }),
                 note,
             ))

@@ -18,6 +18,12 @@ You are connected to Freehold Ledger, a local bookkeeping file for one person's 
 | `correct_transaction` | The amount, date, description, category, asset flag or source was wrong. The original is voided and a linked replacement is recorded in one step. Give at least one field to change, plus a `reason`. |
 | `summarize` | Totals for a period: spending by tax category, income by source, profit. Use a named `period` or `from` plus `to`. |
 | `export_tax_year` | The person wants their books for a preparer ("export my books", "get my taxes ready"). Writes a folder of CSVs, a summary and a plain-language README. |
+| `create_payment_method` | The person names a card, bank account or cash they use ("add my Visa ending 4242"). Keep only a nickname and the last 4 digits. Set `make_default` when they say it is the one they usually use. |
+| `list_payment_methods` | Finding a nickname or id, or answering "which cards do I have on file?". Shows the default and how many entries use each. |
+| `rename_payment_method` | A card or account gets a new name. Entries on it follow the new name. |
+| `retire_payment_method` | A card is closed or an account is no longer used. Nothing is deleted: old entries keep it, and nothing new can go on it. |
+| `set_default_payment_method` | The person says which card new expenses go on by default, or that there should be no default (`clear`). |
+| `assign_payment_method` | Saying what existing entries were paid with ("that was on my Visa", "everything in March was on the Amex"). Find the ids with `list_transactions` (by dates, or `payment_method` set to `"none"`), then assign up to 200 at once. |
 
 ## Conventions
 
@@ -28,6 +34,9 @@ You are connected to Freehold Ledger, a local bookkeeping file for one person's 
 - Set `is_asset` for equipment or property the business keeps for more than a year (a laptop, a camera, a tool).
 - Nothing is ever deleted. Mistakes are voided, reclassified or corrected, and every correction needs a short reason that stays in the history.
 - Every result carries a `note`. Relay it to the person in your own words. Teaching is part of the job: the notes explain what was recorded and what to watch for at tax time.
+- Payment methods are kept by nickname and the last 4 digits only. Never ask for, repeat, or send a full card or account number, an expiry date or a security code. Any tool input holding a full card number, or any run of 13 or more digits, is refused and nothing is stored; tell the person the ledger only keeps the last 4.
+- `record_expense`, `record_income`, `correct_transaction` and `record_transactions` take an optional `payment_method` (nickname or id). An expense with none named goes on the default payment method, if one is set; income never does. A correction keeps the original's payment method unless you give a new one. Each note says which payment method was stored.
+- `list_transactions` and `summarize` filter by `payment_method`; `"none"` means entries without one.
 
 ## Connection
 

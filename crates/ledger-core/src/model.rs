@@ -24,6 +24,8 @@ pub struct NewExpense {
     pub description: String,
     pub category: String,
     pub is_asset: bool,
+    /// `None` means the default payment method, if one is set.
+    pub payment_method: Option<PaymentMethodKey>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -33,6 +35,8 @@ pub struct NewIncome {
     pub description: String,
     pub category: Option<String>,
     pub source: String,
+    /// `None` means no payment method (income never takes the default).
+    pub payment_method: Option<PaymentMethodKey>,
 }
 
 /// Result of voiding a whole batch.
@@ -52,6 +56,8 @@ pub struct Replacement {
     pub category: Option<String>,
     pub is_asset: Option<bool>,
     pub source: Option<String>,
+    /// `None` keeps the original's payment method.
+    pub payment_method: Option<PaymentMethodKey>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,9 +91,17 @@ pub struct Transaction {
     pub replaced_by_id: Option<i64>,
     /// The import batch this entry was recorded in, if any.
     pub batch_id: Option<i64>,
+    /// Current payment method: the latest assignment, if any.
+    pub payment_method: Option<PaymentMethodRef>,
     pub recorded_at: String,
     pub void: Option<VoidInfo>,
     pub classification_history: Vec<ClassificationChange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum PaymentMethodFilter {
+    Id(i64),
+    Unassigned,
 }
 
 /// Both date bounds are inclusive. `category` matches the effective category.
@@ -102,6 +116,7 @@ pub struct Filter {
     pub is_asset: Option<bool>,
     /// Only entries recorded in this import batch.
     pub batch_id: Option<i64>,
+    pub payment_method: Option<PaymentMethodFilter>,
     pub include_voided: bool,
     pub limit: Option<u32>,
 }
@@ -124,12 +139,14 @@ pub enum NewEntry {
 pub struct BatchEntry {
     pub entry: NewEntry,
     pub allow_duplicate: bool,
+    pub payment_method: Option<PaymentMethodKey>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NewBatch {
     pub label: String,
     pub entries: Vec<BatchEntry>,
+    pub payment_method: Option<PaymentMethodKey>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,4 +260,14 @@ impl From<&PaymentMethod> for PaymentMethodRef {
             retired: p.retired,
         }
     }
+}
+
+pub const MAX_ASSIGN: usize = 200;
+
+/// Result of assigning a payment method to one or many transactions.
+#[derive(Debug, Clone, Serialize)]
+pub struct Assignment {
+    pub payment_method: PaymentMethodRef,
+    pub assigned: Vec<Transaction>,
+    pub unchanged_ids: Vec<i64>,
 }

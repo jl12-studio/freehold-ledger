@@ -1,7 +1,7 @@
 use crate::categories::category;
 use crate::db::Ledger;
 use crate::error::LedgerError;
-use crate::model::{Filter, Kind};
+use crate::model::{Filter, Kind, PaymentMethodFilter};
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -57,6 +57,7 @@ pub struct SummaryRequest {
     pub category: Option<String>,
     pub source: Option<String>,
     pub is_asset: Option<bool>,
+    pub payment_method: Option<PaymentMethodFilter>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,6 +77,16 @@ pub struct SourceTotal {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentMethodTotal {
+    pub payment_method_id: Option<i64>,
+    pub nickname: Option<String>,
+    pub last4: Option<String>,
+    pub expenses_total_cents: i64,
+    pub income_total_cents: i64,
+    pub count: i64,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Totals {
     pub total_cents: i64,
@@ -92,6 +103,7 @@ pub struct Summary {
     pub profit_cents: i64,
     pub by_category: Vec<CategoryTotal>,
     pub by_source: Vec<SourceTotal>,
+    pub by_payment_method: Vec<PaymentMethodTotal>,
     pub assets: Totals,
     pub uncategorized: Totals,
     pub voided_excluded: i64,
@@ -108,6 +120,7 @@ impl Ledger {
             category: r.category.clone(),
             source: r.source.clone(),
             is_asset: r.is_asset,
+            payment_method: r.payment_method,
             include_voided: true,
             ..Default::default()
         })?;
@@ -119,12 +132,14 @@ impl Ledger {
             profit_cents: 0,
             by_category: Vec::new(),
             by_source: Vec::new(),
+            by_payment_method: Vec::new(),
             assets: Totals::default(),
             uncategorized: Totals::default(),
             voided_excluded: 0,
         };
         let mut cats: HashMap<String, CategoryTotal> = HashMap::new();
         let mut srcs: HashMap<String, SourceTotal> = HashMap::new();
+        let mut pms: HashMap<Option<i64>, PaymentMethodTotal> = HashMap::new();
         for t in rows {
             if t.void.is_some() {
                 s.voided_excluded += 1;
@@ -152,6 +167,19 @@ impl Ledger {
             });
             c.total_cents += t.amount_cents;
             c.count += 1;
+            let pmt = pms.entry(t.payment_method.as_ref().map(|p| p.id)).or_insert_with(|| PaymentMethodTotal {
+                payment_method_id: t.payment_method.as_ref().map(|p| p.id),
+                nickname: t.payment_method.as_ref().map(|p| p.nickname.clone()),
+                last4: t.payment_method.as_ref().and_then(|p| p.last4.clone()),
+                expenses_total_cents: 0,
+                income_total_cents: 0,
+                count: 0,
+            });
+            match t.kind {
+                Kind::Expense => pmt.expenses_total_cents += t.amount_cents,
+                Kind::Income => pmt.income_total_cents += t.amount_cents,
+            }
+            pmt.count += 1;
             if let Some(name) = &t.income_source {
                 let e = srcs
                     .entry(name.to_lowercase())
@@ -169,6 +197,17 @@ impl Ledger {
         let mut by_source: Vec<_> = srcs.into_values().collect();
         by_source.sort_by(|a, b| b.total_cents.cmp(&a.total_cents).then_with(|| a.source.cmp(&b.source)));
         s.by_source = by_source;
+        let mut by_pm: Vec<_> = pms.into_values().collect();
+        by_pm.sort_by(|a, b| {
+            let (ua, ub) = (a.payment_method_id.is_none(), b.payment_method_id.is_none());
+            ua.cmp(&ub)
+                .then_with(|| {
+                    (b.expenses_total_cents + b.income_total_cents).cmp(&(a.expenses_total_cents + a.income_total_cents))
+                })
+                .then_with(|| a.nickname.cmp(&b.nickname))
+                .then_with(|| a.payment_method_id.cmp(&b.payment_method_id))
+        });
+        s.by_payment_method = by_pm;
         Ok(s)
     }
 }

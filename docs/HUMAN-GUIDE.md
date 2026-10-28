@@ -36,6 +36,19 @@ Open the app and press Connect your agent. It shows the exact settings for Claud
 
 Just tell your agent what was wrong. Nothing is ever deleted. A wrong category is changed and the old one is kept in the history. A duplicate is voided with a reason. A wrong amount or date is corrected: the original is voided and a linked replacement is recorded. Your agent will ask for a reason, and the app shows the trail on each entry.
 
+## Cards and accounts
+
+You can tell your agent which card, bank account or cash each entry was paid with. The ledger keeps only a nickname, such as "Business Visa", and the last 4 digits. It never keeps a full card or account number, an expiry date or a security code: if one is typed into anything, it is refused and nothing is saved.
+
+Things to say:
+
+- "Add my business Visa ending 4242 and use it by default."
+- "That $300 laptop was on the Visa."
+- "Everything I spent in March was on the Amex."
+- "My old Amex is closed."
+
+The app shows each entry's payment method in its own column, and you can filter by it. Entries made before you added a card show "Not set" until you assign one.
+
 ## What the year-end export gives your preparer
 
 Press Export in the app (or ask your agent for your books for the year). It creates a folder such as "Freehold Ledger 2026 export" (with the year you chose) in Documents/Freehold Ledger/exports. Inside:

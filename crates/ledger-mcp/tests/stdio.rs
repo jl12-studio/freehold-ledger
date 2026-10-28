@@ -52,7 +52,8 @@ fn ok_json(r: &CallToolResult) -> Value {
     serde_json::from_str(&text(r)).expect("success content is JSON text")
 }
 
-const TOOLS: [&str; 17] = [
+const TOOLS: [&str; 18] = [
+    "assign_payment_method",
     "correct_transaction",
     "create_payment_method",
     "export_tax_year",
@@ -722,5 +723,137 @@ async fn s_mcp_9_rename_retire_default() {
     assert!(is_error(&call(&client, "set_default_payment_method", json!({ "payment_method": "Cash", "clear": true })).await));
     let r = call(&client, "set_default_payment_method", json!({ "payment_method": "Nope" })).await;
     assert!(is_error(&r) && text(&r).contains("list_payment_methods"), "{}", text(&r));
+    client.cancel().await.ok();
+}
+
+async fn pm_setup(client: &Client) {
+    ok_json(&call(client, "create_payment_method", json!({ "kind": "card", "nickname": "Business Visa", "last4": "4242", "make_default": true })).await);
+    ok_json(&call(client, "create_payment_method", json!({ "kind": "bank_account", "nickname": "Checking", "last4": "6789" })).await);
+    ok_json(&call(client, "create_payment_method", json!({ "kind": "cash", "nickname": "Cash" })).await);
+}
+
+fn txn_ids(v: &Value) -> Vec<i64> {
+    v["transactions"].as_array().unwrap().iter().map(|t| t["id"].as_i64().unwrap()).collect()
+}
+
+#[tokio::test]
+async fn s_mcp_11_assign_one_and_many() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    pm_setup(&client).await;
+
+    let v = ok_json(&call(&client, "assign_payment_method", json!({ "payment_method": "business visa", "ids": [1] })).await);
+    assert_eq!(v["assigned_count"], 1);
+    let n = note(&v);
+    assert!(n.contains("Business Visa (card ending 4242)"), "{n}");
+
+    let v = ok_json(&call(&client, "assign_payment_method", json!({ "payment_method": "Checking", "ids": [2, 3] })).await);
+    assert_eq!(v["assigned_count"], 2);
+    let v = ok_json(&call(&client, "assign_payment_method", json!({ "payment_method": "Checking", "ids": [2, 3] })).await);
+    assert_eq!(v["assigned_count"], 0);
+    assert_eq!(v["unchanged_count"], 2);
+    assert!(note(&v).starts_with("Nothing changed"), "{}", note(&v));
+
+    let v = ok_json(&call(&client, "list_transactions", json!({ "payment_method": "Checking" })).await);
+    let mut got = txn_ids(&v);
+    got.sort();
+    assert_eq!(got, vec![2, 3]);
+    let v = ok_json(&call(&client, "list_transactions", json!({ "payment_method": "none" })).await);
+    assert_eq!(txn_ids(&v), vec![10, 4, 5, 8, 9]);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_12_assign_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    pm_setup(&client).await;
+
+    let r = call(&client, "assign_payment_method", json!({ "payment_method": "Cash", "ids": [4, 6] })).await;
+    assert!(is_error(&r));
+    let t = text(&r);
+    assert!(t.contains("voided") && t.contains("Nothing was assigned"), "{t}");
+    let v = ok_json(&call(&client, "list_transactions", json!({ "payment_method": "none" })).await);
+    assert!(txn_ids(&v).contains(&4));
+
+    assert!(is_error(&call(&client, "assign_payment_method", json!({ "payment_method": "Cash", "ids": [] })).await));
+    let many: Vec<i64> = (1..=201).collect();
+    let r = call(&client, "assign_payment_method", json!({ "payment_method": "Cash", "ids": many })).await;
+    assert!(is_error(&r) && text(&r).contains("200"), "{}", text(&r));
+    let r = call(&client, "assign_payment_method", json!({ "payment_method": "Nope", "ids": [1] })).await;
+    assert!(is_error(&r) && text(&r).contains("list_payment_methods"), "{}", text(&r));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_13_default_on_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    pm_setup(&client).await;
+
+    let v = ok_json(&call(&client, "record_expense", json!({ "amount": "40", "description": "Mouse", "category": "supplies" })).await);
+    assert_eq!(v["payment_method"]["nickname"], "Business Visa");
+    let n = note(&v);
+    assert!(n.contains("(your default)"), "{n}");
+
+    let v = ok_json(&call(&client, "record_expense", json!({ "amount": "5", "description": "Pen", "category": "supplies", "payment_method": "cash" })).await);
+    assert_eq!(v["payment_method"]["nickname"], "Cash");
+
+    let v = ok_json(&call(&client, "record_income", json!({ "amount": "500", "description": "Logo", "source": "Acme" })).await);
+    assert!(v["payment_method"].is_null());
+    assert!(note(&v).contains("No payment method is set"), "{}", note(&v));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_14_correction_keeps_method() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    pm_setup(&client).await;
+    let m = ok_json(&call(&client, "record_expense", json!({ "amount": "40", "description": "Mouse", "category": "supplies" })).await);
+    let id = m["id"].as_i64().unwrap();
+
+    let v = ok_json(&call(&client, "correct_transaction", json!({ "id": id, "reason": "wrong amount", "amount": "45" })).await);
+    assert_eq!(v["replacement"]["payment_method"]["nickname"], "Business Visa");
+    assert!(note(&v).contains("(kept from the original)"), "{}", note(&v));
+    let id2 = v["replacement"]["id"].as_i64().unwrap();
+
+    let v = ok_json(&call(&client, "correct_transaction", json!({ "id": id2, "reason": "was cash", "payment_method": "Cash" })).await);
+    assert_eq!(v["replacement"]["payment_method"]["nickname"], "Cash");
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_15_batch_payment_methods() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    pm_setup(&client).await;
+    let entries = json!([
+        { "kind": "expense", "amount": "18.17", "description": "GODADDY.COM G1", "date": "2026-01-05", "category": "advertising" },
+        { "kind": "income", "amount": "200", "description": "Upwork payout UP", "date": "2026-01-06", "source": "Upwork" },
+        { "kind": "expense", "amount": "9.99", "description": "Stationery ST", "date": "2026-01-07", "category": "supplies", "payment_method": "Cash" }
+    ]);
+    let v = ok_json(&call(&client, "record_transactions", json!({ "label": "chase-jan.csv", "payment_method": "Checking", "entries": entries })).await);
+    let rec = v["recorded"].as_array().unwrap();
+    assert_eq!(rec[0]["payment_method"]["nickname"], "Checking");
+    assert_eq!(rec[1]["payment_method"]["nickname"], "Checking");
+    assert_eq!(rec[2]["payment_method"]["nickname"], "Cash");
+    assert!(note(&v).contains("Payment methods: Checking on 2, Cash on 1"), "{}", note(&v));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_16_summarize_by_payment_method() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    pm_setup(&client).await;
+    ok_json(&call(&client, "assign_payment_method", json!({ "payment_method": "business visa", "ids": [1] })).await);
+    ok_json(&call(&client, "assign_payment_method", json!({ "payment_method": "Checking", "ids": [2, 3] })).await);
+
+    let v = ok_json(&call(&client, "summarize", json!({ "from": "2026-01-01", "to": "2026-12-31" })).await);
+    assert_eq!(v["by_payment_method"][0]["nickname"], "Checking");
+    assert_eq!(v["by_payment_method"][0]["income_total"], "$1,285.00");
+    let v = ok_json(&call(&client, "summarize", json!({ "from": "2026-01-01", "to": "2026-12-31", "payment_method": "Business Visa" })).await);
+    assert_eq!(v["expenses_total"], "$300.00");
     client.cancel().await.ok();
 }

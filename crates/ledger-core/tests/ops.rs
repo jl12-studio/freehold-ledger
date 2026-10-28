@@ -7,11 +7,11 @@ fn d(s: &str) -> NaiveDate {
 }
 
 fn exp(cents: i64, desc: &str, cat: &str, asset: bool) -> NewExpense {
-    NewExpense { occurred_on: None, amount_cents: cents, description: desc.into(), category: cat.into(), is_asset: asset }
+    NewExpense { occurred_on: None, amount_cents: cents, description: desc.into(), category: cat.into(), is_asset: asset, payment_method: None }
 }
 
 fn inc(cents: i64, desc: &str, src: &str) -> NewIncome {
-    NewIncome { occurred_on: None, amount_cents: cents, description: desc.into(), category: None, source: src.into() }
+    NewIncome { occurred_on: None, amount_cents: cents, description: desc.into(), category: None, source: src.into(), payment_method: None }
 }
 
 fn count(l: &Ledger) -> i64 {

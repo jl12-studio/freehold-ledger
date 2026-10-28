@@ -10,7 +10,7 @@ fn today() -> NaiveDate {
 }
 fn req(p: Period) -> SummaryRequest {
     let (from, to) = ledger_core::resolve_period(p, today());
-    SummaryRequest { from, to, category: None, source: None, is_asset: None }
+    SummaryRequest { from, to, category: None, source: None, is_asset: None, payment_method: None }
 }
 
 #[test]
@@ -80,6 +80,7 @@ fn uncategorized_is_counted_until_reclassified() {
             description: "Mystery".into(),
             category: "uncategorized".into(),
             is_asset: false,
+            payment_method: None,
         })
         .unwrap();
     let s = l.summarize(&req(Period::ThisYear)).unwrap();
@@ -107,6 +108,6 @@ fn period_resolution_boundaries() {
 #[test]
 fn invalid_range_rejected() {
     let (_d, l) = common::seeded();
-    let r = SummaryRequest { from: d("2026-02-01"), to: d("2026-01-01"), category: None, source: None, is_asset: None };
+    let r = SummaryRequest { from: d("2026-02-01"), to: d("2026-01-01"), category: None, source: None, is_asset: None, payment_method: None };
     assert!(matches!(l.summarize(&r), Err(LedgerError::InvalidRange { .. })));
 }

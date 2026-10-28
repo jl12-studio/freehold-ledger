@@ -11,6 +11,7 @@ fn expense(description: &str) -> NewExpense {
         description: description.to_string(),
         category: "office_expense".to_string(),
         is_asset: false,
+        payment_method: None,
     }
 }
 
@@ -105,6 +106,7 @@ fn s_pan_5_core_writes_store_nothing() {
             description: "Client payment".to_string(),
             category: None,
             source: "Acct 000123456789012".to_string(),
+            payment_method: None,
         })
         .unwrap_err();
     assert!(matches!(e, LedgerError::AccountNumberInText { .. }));
@@ -121,13 +123,15 @@ fn s_pan_5_core_writes_store_nothing() {
         category: None,
         is_asset: None,
         source: None,
+        payment_method: None,
     };
     assert_eq!(field(l.correct(t.id, bad, change).unwrap_err()), "reason");
 
     let e = l
         .record_batch(NewBatch {
             label: "statement 4242 4242 4242 4242".to_string(),
-            entries: vec![BatchEntry { entry: NewEntry::Expense(expense("Stamps")), allow_duplicate: false }],
+            payment_method: None,
+            entries: vec![BatchEntry { entry: NewEntry::Expense(expense("Stamps")), allow_duplicate: false, payment_method: None }],
         })
         .unwrap_err();
     assert!(matches!(e, LedgerError::CardNumberInText { .. }));
@@ -136,9 +140,10 @@ fn s_pan_5_core_writes_store_nothing() {
     let e = l
         .record_batch(NewBatch {
             label: "statement".to_string(),
+            payment_method: None,
             entries: vec![BatchEntry {
                 entry: NewEntry::Expense(expense("4242 4242 4242 4242")),
-                allow_duplicate: false,
+                allow_duplicate: false, payment_method: None,
             }],
         })
         .unwrap_err();

@@ -29,6 +29,7 @@ A transaction is one thing that happened to the money of your business: one expe
 | income source | Income only: who paid you (section 4). Expenses have none. |
 | `recorded_at` | When the entry was written into the ledger, in UTC. Set by the ledger, not by you. |
 | `replaces_id` | Only on a correction: the id of the entry this one replaces. Empty otherwise. |
+| payment method | Optional: the card, bank account, cash or other method it was paid with (see Payment methods below). Empty until one is set. |
 
 Assets are listed separately in the export. The app does not compute depreciation; your agent and your tax preparer supply that knowledge.
 
@@ -93,9 +94,27 @@ To stop an import from counting the same money twice, an entry is skipped (and r
 
 A whole batch can be undone in one step, which voids every live entry in it (replacements of corrected entries included) with one reason and deletes nothing. A replacement made by correcting an entry joins its original's batch.
 
+## Payment methods
+
+A payment method is a card, a bank account, cash, or something else the business pays with or gets paid into. Each has a nickname, such as "Business Visa", and, for cards and accounts, optionally the last 4 digits of its number. The ledger never keeps a full card or account number, an expiry date or a security code. Any text that holds a full card number, or any run of 13 or more digits, is refused before it is stored, wherever it is typed.
+
+| Table | In plain words |
+|---|---|
+| `payment_methods` | One row per payment method: its kind (`card`, `bank_account`, `cash` or `other`), its first nickname, its last 4 digits or none, and when it was added. |
+| `payment_method_changes` | Renames and retirements. The latest rename is the nickname you see. A retired method is never deleted. |
+| `default_payment_method_changes` | Each time the default is set or cleared. The latest row is the default, so there is at most one. |
+| `payment_method_assignments` | Each time an entry is put on a payment method. The latest row for an entry is its payment method; earlier rows are the history. |
+
+- Nicknames are unique among payment methods in use, in any letter case. "none" is reserved.
+- A new expense with no payment method named goes on the default, if there is one. Income never does.
+- A correction's replacement keeps the original's payment method unless a new one is given.
+- Voided entries keep their payment method and cannot be moved to another.
+- Entries recorded before payment methods existed have none until one is assigned.
+- All four tables are append-only, like the rest of the ledger.
+
 ## 6. Versions
 
-The file records its schema version; the current one is schema 2 (batches were added in 2). A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
+The file is now schema 3; files from schema 1 or 2 upgrade automatically when opened. A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
 
 ## 7. What must never be lost
 
@@ -104,6 +123,9 @@ The file records its schema version; the current one is schema 2 (batches were a
 - Every classification change
 - Every income source
 - Every batch and which entries it holds
+- Every payment method, rename and retirement
+- Every change of default payment method
+- Every payment method assignment
 
 ## 8. What the export will contain (coming in M4)
 

@@ -87,6 +87,7 @@ impl FilterDto {
             source: non_empty(&self.source).map(str::to_string),
             is_asset: None,
             batch_id: None,
+            payment_method: None,
             include_voided: self.include_voided,
             limit: None,
         })

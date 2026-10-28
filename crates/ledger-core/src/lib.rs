@@ -15,13 +15,13 @@ pub use db::{default_db_path, resolve_db_path, Ledger, LedgerInfo, SUPPORTED_SCH
 pub use error::LedgerError;
 pub use categories::{categories, category, Category};
 pub use model::{
-    BatchEntry, BatchResult, BatchVoid, ClassificationChange, Correction, Filter, Kind, NewBatch, NewEntry,
-    NewExpense, NewIncome, NewPaymentMethod, PaymentKind, PaymentMethod, PaymentMethodKey, PaymentMethodRef,
+    Assignment, BatchEntry, BatchResult, BatchVoid, ClassificationChange, Correction, Filter, Kind, NewBatch, NewEntry,
+    NewExpense, NewIncome, NewPaymentMethod, PaymentKind, PaymentMethod, PaymentMethodKey, PaymentMethodFilter, PaymentMethodRef,
     RecordedEntry, Replacement, SkippedDuplicate, Transaction, VoidInfo,
-    MAX_BATCH,
+    MAX_ASSIGN, MAX_BATCH,
 };
 pub use export::ExportResult;
 pub use guard::{check_no_full_number, MIN_FULL_NUMBER_DIGITS};
 pub use ops::parse_date;
 pub use seed::seed_demo;
-pub use summary::{resolve_period, CategoryTotal, Period, SourceTotal, Summary, SummaryRequest, Totals};
+pub use summary::{resolve_period, CategoryTotal, Period, PaymentMethodTotal, SourceTotal, Summary, SummaryRequest, Totals};

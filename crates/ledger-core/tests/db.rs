@@ -127,6 +127,7 @@ fn s_imm_2_insert_or_replace_cannot_rewrite_append_only_rows() {
             description: "Device".into(),
             category: "supplies".into(),
             is_asset: false,
+            payment_method: None,
         })
         .unwrap();
     l.reclassify(t.id, "office_expense", "desk lamp").unwrap();
@@ -173,6 +174,7 @@ fn s_file_5_schema_1_file_upgrades() {
     let r = l
         .record_batch(ledger_core::NewBatch {
             label: "after upgrade".into(),
+            payment_method: None,
             entries: vec![ledger_core::BatchEntry {
                 entry: ledger_core::NewEntry::Expense(ledger_core::NewExpense {
                     occurred_on: None,
@@ -180,8 +182,10 @@ fn s_file_5_schema_1_file_upgrades() {
                     description: "pens".into(),
                     category: "supplies".into(),
                     is_asset: false,
+                    payment_method: None,
                 }),
                 allow_duplicate: false,
+                payment_method: None,
             }],
         })
         .unwrap();

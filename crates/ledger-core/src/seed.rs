@@ -13,6 +13,7 @@ pub fn seed_demo(l: &mut Ledger) -> Result<(), LedgerError> {
             description: desc.to_string(),
             category: cat.to_string(),
             is_asset: asset,
+            payment_method: None,
         })
     };
     let inc = |d: &str, c: i64, desc: &str, src: &str| -> Result<NewIncome, LedgerError> {
@@ -22,6 +23,7 @@ pub fn seed_demo(l: &mut Ledger) -> Result<(), LedgerError> {
             description: desc.to_string(),
             category: None,
             source: src.to_string(),
+            payment_method: None,
         })
     };
     l.record_expense(exp("2026-10-20", 30000, "Laptop for client work", "supplies", true)?)?;

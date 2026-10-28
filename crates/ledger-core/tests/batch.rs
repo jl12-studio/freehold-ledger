@@ -19,8 +19,9 @@ fn exp(date: &str, cents: i64, desc: &str, cat: &str) -> BatchEntry {
             description: desc.into(),
             category: cat.into(),
             is_asset: false,
+            payment_method: None,
         }),
-        allow_duplicate: false,
+        allow_duplicate: false, payment_method: None,
     }
 }
 
@@ -32,8 +33,9 @@ fn inc(date: &str, cents: i64, desc: &str, source: &str) -> BatchEntry {
             description: desc.into(),
             category: None,
             source: source.into(),
+            payment_method: None,
         }),
-        allow_duplicate: false,
+        allow_duplicate: false, payment_method: None,
     }
 }
 
@@ -50,7 +52,7 @@ fn lic() -> BatchEntry {
     exp("2026-01-22", 7500, "CITY OF AUSTIN BUSINESS LICENSE", "taxes_licenses")
 }
 fn batch(label: &str, entries: Vec<BatchEntry>) -> NewBatch {
-    NewBatch { label: label.into(), entries }
+    NewBatch { label: label.into(), entries, payment_method: None }
 }
 
 fn summary_2026(l: &ledger_core::Ledger) -> ledger_core::Summary {
@@ -61,6 +63,7 @@ fn summary_2026(l: &ledger_core::Ledger) -> ledger_core::Summary {
             category: None,
             source: None,
             is_asset: None,
+            payment_method: None,
         })
         .unwrap()
 }
@@ -185,6 +188,7 @@ fn s_bat_3_batch_link() {
             description: "single".into(),
             category: "supplies".into(),
             is_asset: false,
+            payment_method: None,
         })
         .unwrap();
     assert_eq!(single.batch_id, None);
@@ -264,6 +268,7 @@ fn s_bat_6_corrected_rows_go_too() {
             description: "solo".into(),
             category: "supplies".into(),
             is_asset: false,
+            payment_method: None,
         })
         .unwrap();
     let c2 = l.correct(single.id, "typo", Default::default()).unwrap();

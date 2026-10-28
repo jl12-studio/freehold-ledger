@@ -28,3 +28,34 @@ fn data_model_lists_every_category_key() {
         assert!(doc.contains(&format!("| `{}` |", c.key)), "DATA-MODEL.md is missing {}", c.key);
     }
 }
+
+const TOOLS: [&str; 18] = [
+    "assign_payment_method", "correct_transaction", "create_payment_method", "export_tax_year",
+    "ledger_info", "list_categories", "list_payment_methods", "list_transactions",
+    "reclassify_transaction", "record_expense", "record_income", "record_transactions",
+    "rename_payment_method", "retire_payment_method", "set_default_payment_method", "summarize",
+    "void_batch", "void_transaction",
+];
+
+#[test]
+fn agent_guide_lists_every_tool() {
+    let guide = repo_file("docs/AGENT-GUIDE.md");
+    for t in TOOLS {
+        assert!(guide.contains(&format!("| `{t}` |")), "AGENT-GUIDE.md is missing {t}");
+    }
+}
+
+#[test]
+fn guides_have_no_em_dash() {
+    for f in ["README.md", "DATA-MODEL.md", "docs/AGENT-GUIDE.md", "docs/HUMAN-GUIDE.md"] {
+        assert!(!repo_file(f).contains('\u{2014}'), "{f} contains an em dash");
+    }
+}
+
+#[test]
+fn data_model_names_payment_method_tables() {
+    let doc = repo_file("DATA-MODEL.md");
+    for t in ["payment_methods", "payment_method_changes", "default_payment_method_changes", "payment_method_assignments"] {
+        assert!(doc.contains(&format!("`{t}`")), "DATA-MODEL.md is missing {t}");
+    }
+}

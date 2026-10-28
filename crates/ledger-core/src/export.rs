@@ -275,7 +275,7 @@ impl Ledger {
 
         let mut rows = self.list(&Filter { from: Some(from), to: Some(to), include_voided: true, ..Default::default() })?;
         rows.sort_by_key(|t| (t.occurred_on, t.id));
-        let summary = self.summarize(&SummaryRequest { from, to, category: None, source: None, is_asset: None })?;
+        let summary = self.summarize(&SummaryRequest { from, to, category: None, source: None, is_asset: None, payment_method: None })?;
         let schema_version = self.info()?.schema_version;
         let files = build(&rows);
 
@@ -344,6 +344,7 @@ fn write_all(
 
     let mut j = serde_json::to_value(summary).expect("summary serializes");
     if let Value::Object(o) = &mut j {
+        o.remove("by_payment_method");
         o.insert("generated_at".into(), chrono::Utc::now().to_rfc3339().into());
         o.insert("app_version".into(), env!("CARGO_PKG_VERSION").into());
         o.insert("schema_version".into(), schema_version.into());

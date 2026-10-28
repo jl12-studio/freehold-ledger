@@ -59,7 +59,7 @@ fn s_exp_1_seed_2026_export_matches_summarize() {
     assert!(rows.iter().all(|r| r[col(&h, "date")].starts_with("2026-")));
 
     let s = l
-        .summarize(&SummaryRequest { from: d("2026-01-01"), to: d("2026-12-31"), category: None, source: None, is_asset: None })
+        .summarize(&SummaryRequest { from: d("2026-01-01"), to: d("2026-12-31"), category: None, source: None, is_asset: None, payment_method: None })
         .unwrap();
 
     let (h, rows) = read_csv(&r.folder.join("expenses-by-category.csv"));
@@ -100,7 +100,10 @@ fn s_exp_1_seed_2026_export_matches_summarize() {
     for k in ["generated_at", "app_version", "schema_version"] {
         assert!(o.remove(k).is_some(), "{k} missing");
     }
-    assert_eq!(j, serde_json::to_value(&s).unwrap());
+    assert!(o.get("by_payment_method").is_none());
+    let mut expected = serde_json::to_value(&s).unwrap();
+    expected.as_object_mut().unwrap().remove("by_payment_method");
+    assert_eq!(j, expected);
 
     let readme = std::fs::read_to_string(r.folder.join("README.txt")).unwrap();
     assert!(!readme.contains('\u{2014}'));
@@ -167,6 +170,7 @@ fn csv_escapes_commas_quotes_and_newlines() {
         description: desc.to_string(),
         category: "rent_other".to_string(),
         is_asset: false,
+        payment_method: None,
     })
     .unwrap();
     let out = tempfile::tempdir().unwrap();

@@ -46,6 +46,12 @@ pub enum LedgerError {
     AmbiguousPaymentMethod { nickname: String, ids: String },
     #[error("\"{0}\" is retired, so nothing new can go on it. Use another payment method or create a new one.")]
     RetiredPaymentMethod(String),
+    #[error("Give at least one transaction id.")]
+    NoIdsGiven,
+    #[error("{count} ids is more than one call takes. Send at most 200 ids per call. Nothing was assigned.")]
+    TooManyIds { count: usize },
+    #[error("Transaction {0} was voided, so its payment method cannot change. Nothing was assigned.")]
+    AssignVoided(i64),
     #[error("\"{0}\" is already retired.")]
     AlreadyRetired(String),
     #[error("Dates look like 2026-10-27.")]
