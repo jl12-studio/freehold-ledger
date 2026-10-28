@@ -1,4 +1,9 @@
-import type { Category, Transaction } from "../../lib/api";
+import type { Category, PaymentMethod, PaymentMethodRef, Transaction } from "../../lib/api";
+
+const BUSINESS_VISA: PaymentMethodRef = { id: 1, kind: "card", nickname: "Business Visa", last4: "4242", retired: false };
+const CHECKING: PaymentMethodRef = { id: 2, kind: "bank_account", nickname: "Checking", last4: "6789", retired: false };
+const CASH: PaymentMethodRef = { id: 3, kind: "cash", nickname: "Cash", last4: null, retired: false };
+const OLD_AMEX: PaymentMethodRef = { id: 4, kind: "card", nickname: "Old Amex", last4: "0005", retired: true };
 
 // Shaped like the Rust serde output of the JIP-472 seed (newest first).
 export const seedTransactions: Transaction[] = [
@@ -14,6 +19,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "22",
     "is_asset": true,
     "income_source": null,
+    "payment_method": BUSINESS_VISA,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -32,6 +38,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "1",
     "is_asset": false,
     "income_source": "Upwork",
+    "payment_method": CHECKING,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -50,6 +57,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "8",
     "is_asset": false,
     "income_source": null,
+    "payment_method": BUSINESS_VISA,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -68,6 +76,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "1",
     "is_asset": false,
     "income_source": "Etsy",
+    "payment_method": CHECKING,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -86,6 +95,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "18",
     "is_asset": false,
     "income_source": null,
+    "payment_method": CASH,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -110,6 +120,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "8",
     "is_asset": false,
     "income_source": null,
+    "payment_method": null,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -131,6 +142,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "8",
     "is_asset": false,
     "income_source": null,
+    "payment_method": null,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -149,6 +161,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "22",
     "is_asset": false,
     "income_source": null,
+    "payment_method": null,
     "replaces_id": 7,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -167,6 +180,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "22",
     "is_asset": false,
     "income_source": null,
+    "payment_method": null,
     "replaces_id": null,
     "replaced_by_id": 8,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -188,6 +202,7 @@ export const seedTransactions: Transaction[] = [
     "schedule_c_line": "20b",
     "is_asset": false,
     "income_source": null,
+    "payment_method": OLD_AMEX,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -243,3 +258,11 @@ export const categories: Category[] = [
 ];
 
 export const sources: string[] = ["Etsy", "Upwork"];
+
+const pmMeta = { created_at: "2026-10-28T02:15:47.940Z" };
+export const paymentMethods: PaymentMethod[] = [
+  { ...BUSINESS_VISA, is_default: true, ...pmMeta, retired_at: null, transaction_count: 2 },
+  { ...CASH, is_default: false, ...pmMeta, retired_at: null, transaction_count: 1 },
+  { ...CHECKING, is_default: false, ...pmMeta, retired_at: null, transaction_count: 2 },
+  { ...OLD_AMEX, is_default: false, ...pmMeta, retired_at: "2026-10-28T02:15:47.940Z", transaction_count: 1 },
+];

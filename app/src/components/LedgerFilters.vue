@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import type { Category } from "../lib/api";
+import type { Category, PaymentMethod } from "../lib/api";
 import { isDirty } from "../lib/filters";
 import type { FilterState } from "../lib/filters";
 
-const props = defineProps<{ modelValue: FilterState; categories: Category[]; sources: string[] }>();
+const props = defineProps<{ modelValue: FilterState; categories: Category[]; sources: string[]; paymentMethods: PaymentMethod[] }>();
 const emit = defineEmits<{ "update:modelValue": [value: FilterState]; clear: [] }>();
 
 const expenseCats = computed(() => props.categories.filter((c) => c.kind === "expense"));
 const incomeCats = computed(() => props.categories.filter((c) => c.kind === "income"));
+const activeMethods = computed(() => props.paymentMethods.filter((m) => !m.retired));
+const retiredMethods = computed(() => props.paymentMethods.filter((m) => m.retired));
+function methodLabel(m: PaymentMethod): string {
+  return m.last4 ? `${m.nickname} (${m.last4})` : m.nickname;
+}
 const dirty = computed(() => isDirty(props.modelValue));
 
 function update(patch: Partial<FilterState>) {
@@ -71,6 +76,16 @@ const labelCls = "flex flex-col gap-1 text-caption text-muted";
       <select name="source" :class="control" :disabled="modelValue.kind === 'expense'" :value="modelValue.source" @change="update({ source: ($event.target as HTMLSelectElement).value })">
         <option value="">All</option>
         <option v-for="s in sources" :key="s" :value="s">{{ s }}</option>
+      </select>
+    </label>
+    <label :class="labelCls"><span>Payment method</span>
+      <select name="payment_method" :class="control" :value="modelValue.payment_method" @change="update({ payment_method: ($event.target as HTMLSelectElement).value })">
+        <option value="">All</option>
+        <option v-for="m in activeMethods" :key="m.id" :value="String(m.id)">{{ methodLabel(m) }}</option>
+        <optgroup v-if="retiredMethods.length > 0" label="Retired">
+          <option v-for="m in retiredMethods" :key="m.id" :value="String(m.id)">{{ methodLabel(m) }}</option>
+        </optgroup>
+        <option value="none">Not set</option>
       </select>
     </label>
     <label class="flex min-h-9 items-center gap-2 text-caption text-muted">

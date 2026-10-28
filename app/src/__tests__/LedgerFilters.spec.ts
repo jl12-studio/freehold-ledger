@@ -73,6 +73,34 @@ describe("Ledger filters", () => {
     expect(clearButtons(wrapper)).toHaveLength(0);
   });
 
+  it("s_ui_6_payment_method_filter", async () => {
+    const wrapper = await launch();
+    const select = () => wrapper.get("select[name='payment_method']");
+    expect(select().attributes("disabled")).toBeUndefined();
+    expect(select().findAll("option").map((o) => o.text())).toEqual([
+      "All", "Business Visa (4242)", "Cash", "Checking (6789)", "Old Amex (0005)", "Not set",
+    ]);
+    expect(select().get("optgroup").attributes("label")).toBe("Retired");
+    expect(select().get("optgroup").text()).toBe("Old Amex (0005)");
+
+    await select().setValue("1");
+    await flushPromises();
+    expect(lastFilter()).toEqual({ payment_method: "1", include_voided: true });
+    expect(ids(wrapper)).toEqual([1, 10]);
+    expect(clearButtons(wrapper).length).toBeGreaterThan(0);
+
+    await select().setValue("none");
+    await flushPromises();
+    expect(lastFilter()).toEqual({ payment_method: "none", include_voided: true });
+    expect([...ids(wrapper)].sort((a, b) => a - b)).toEqual([5, 6, 7, 8]);
+
+    await clearButtons(wrapper)[0].trigger("click");
+    await flushPromises();
+    expect(lastFilter()).toEqual({ include_voided: true });
+    expect((select().element as HTMLSelectElement).value).toBe("");
+    expect(clearButtons(wrapper)).toHaveLength(0);
+  });
+
   it("date_range_narrows_after_250ms_debounce", async () => {
     const wrapper = await launch();
     vi.useFakeTimers();

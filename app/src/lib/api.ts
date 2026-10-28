@@ -51,6 +51,34 @@ export interface ClassificationChange {
   recorded_at: string;
 }
 
+export type PaymentKind = "card" | "bank_account" | "cash" | "other";
+
+export interface PaymentMethodRef {
+  id: number;
+  kind: PaymentKind;
+  nickname: string;
+  last4: string | null;
+  retired: boolean;
+}
+
+export interface PaymentMethod extends PaymentMethodRef {
+  is_default: boolean;
+  created_at: string;
+  retired_at: string | null;
+  transaction_count: number;
+}
+
+const KIND_LABEL: Record<PaymentKind, string> = {
+  card: "Card",
+  bank_account: "Bank account",
+  cash: "Cash",
+  other: "Other",
+};
+
+export function paymentCaption(p: PaymentMethodRef): string {
+  return KIND_LABEL[p.kind] + (p.last4 ? ` ending ${p.last4}` : "") + (p.retired ? " (retired)" : "");
+}
+
 export interface Transaction {
   id: number;
   kind: KindName;
@@ -63,6 +91,7 @@ export interface Transaction {
   schedule_c_line: string | null;
   is_asset: boolean;
   income_source: string | null;
+  payment_method: PaymentMethodRef | null;
   replaces_id: number | null;
   replaced_by_id: number | null;
   recorded_at: string;
@@ -84,6 +113,7 @@ export interface Filter {
   kind?: KindName;
   category?: string;
   source?: string;
+  payment_method?: string;
   include_voided: boolean;
 }
 
@@ -93,6 +123,10 @@ export function listTransactions(filter: Filter): Promise<Transaction[]> {
 
 export function listCategories(): Promise<Category[]> {
   return invoke<Category[]>("list_categories");
+}
+
+export function listPaymentMethods(): Promise<PaymentMethod[]> {
+  return invoke<PaymentMethod[]>("list_payment_methods");
 }
 
 export function listIncomeSources(): Promise<string[]> {

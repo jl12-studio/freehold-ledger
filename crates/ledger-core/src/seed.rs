@@ -1,6 +1,6 @@
 use crate::db::Ledger;
 use crate::error::LedgerError;
-use crate::model::{NewExpense, NewIncome, Replacement};
+use crate::model::{NewExpense, NewIncome, NewPaymentMethod, PaymentKind, PaymentMethodKey, Replacement};
 use crate::ops::parse_date;
 
 /// Records the fixed demo ledger used by tests, smokes and the seed example.
@@ -42,5 +42,28 @@ pub fn seed_demo(l: &mut Ledger) -> Result<(), LedgerError> {
     )?;
     l.record_expense(exp("2025-12-15", 90000, "Booth rent, winter market", "rent_other", false)?)?;
     l.record_expense(exp("2026-09-30", 2500, "Flyers", "advertising", false)?)?;
+    Ok(())
+}
+
+/// Adds the demo payment methods on top of `seed_demo` (run that first): Business Visa (card 4242,
+/// default) on entries 1 and 10, Checking (bank account 6789) on 2 and 3, Cash on 4, and Old Amex
+/// (card 0005) on 9, then retired. Entries 5 and 8 stay without one; 6 and 7 are voided.
+pub fn seed_demo_payment_methods(l: &mut Ledger) -> Result<(), LedgerError> {
+    let pm = |kind: PaymentKind, nickname: &str, last4: Option<&str>, make_default: bool| NewPaymentMethod {
+        kind,
+        nickname: nickname.to_string(),
+        last4: last4.map(str::to_string),
+        make_default,
+    };
+    l.create_payment_method(pm(PaymentKind::Card, "Business Visa", Some("4242"), true))?;
+    l.create_payment_method(pm(PaymentKind::BankAccount, "Checking", Some("6789"), false))?;
+    l.create_payment_method(pm(PaymentKind::Cash, "Cash", None, false))?;
+    l.create_payment_method(pm(PaymentKind::Card, "Old Amex", Some("0005"), false))?;
+    let key = |n: &str| PaymentMethodKey::Nickname(n.to_string());
+    l.assign_payment_method(&key("Business Visa"), &[1, 10])?;
+    l.assign_payment_method(&key("Checking"), &[2, 3])?;
+    l.assign_payment_method(&key("Cash"), &[4])?;
+    l.assign_payment_method(&key("Old Amex"), &[9])?;
+    l.retire_payment_method(&key("Old Amex"))?;
     Ok(())
 }

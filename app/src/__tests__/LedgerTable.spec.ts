@@ -51,8 +51,25 @@ describe("Ledger table", () => {
     expect(rowFor(wrapper, 2).text()).toContain("Upwork");
     expect(rowFor(wrapper, 2).text()).toContain("Income");
     expect(wrapper.findAll("th[scope='col']").map((h) => h.text())).toEqual([
-      "Date", "Description", "Category", "Source", "Kind", "Amount",
+      "Date", "Description", "Category", "Payment method", "Source", "Kind", "Amount",
     ]);
+  });
+
+  it("s_ui_5_payment_method_column", async () => {
+    const wrapper = await launch();
+    const cell = (id: number) => rowFor(wrapper, id).findAll("td")[3];
+    expect(cell(1).text()).toContain("Business Visa");
+    expect(cell(1).text()).toContain("Card ending 4242");
+    expect(cell(2).text()).toContain("Checking");
+    expect(cell(2).text()).toContain("Bank account ending 6789");
+    expect(cell(4).text()).toBe("Cash Cash");
+    expect(cell(9).text()).toContain("Old Amex");
+    expect(cell(9).text()).toContain("Card ending 0005 (retired)");
+    const none = cell(5).get("span");
+    expect(none.text()).toBe("Not set");
+    expect(none.classes()).toContain("text-muted");
+    for (const id of [1, 2, 4, 5, 9]) expect(cell(id).text()).not.toContain("\u2014");
+    expect(rowFor(wrapper, 1).findAll("td").slice(-1)[0].text()).toBe("$300.00");
   });
 
   it("s_ui_3_voided_row_struck_with_reason", async () => {

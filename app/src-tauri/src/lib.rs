@@ -37,6 +37,7 @@ pub fn run() {
             commands::list_transactions,
             commands::list_categories,
             commands::list_income_sources,
+            commands::list_payment_methods,
             commands::ledger_years,
             commands::export_tax_year,
             commands::mcp_connection_info

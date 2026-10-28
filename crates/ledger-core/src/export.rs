@@ -101,6 +101,8 @@ fn build(rows: &[Transaction]) -> Files {
             opt(&t.replaced_by_id),
             t.original_category.clone(),
             t.recorded_at.clone(),
+            t.payment_method.as_ref().map(|p| p.nickname.clone()).unwrap_or_default(),
+            t.payment_method.as_ref().and_then(|p| p.last4.clone()).unwrap_or_default(),
         ]);
         if let Some(v) = &t.void {
             f.corrections.push(vec![
@@ -235,7 +237,7 @@ Freehold Ledger does not give tax advice; your preparer decides how to treat ass
     t.push_str(&at_a_glance(f));
     t.push_str(
         "FILES\n\n\
-transactions.csv: every entry dated in the year, voided ones included. Columns: id (the entry number); date; kind (expense or income); description; amount (dollars); amount_cents; category_key (the current category); category_label (its plain name); schedule_c_line (the Schedule C line, blank for uncategorized); is_asset (yes if it is equipment or property kept longer than a year); income_source (who paid, for income); status (active or voided); voided_reason (why it was voided); replaces_id (the older entry this one replaced); replaced_by_id (the newer entry that replaced this one); original_category_key (the category when first recorded); recorded_at (when it was entered, UTC).\n\n\
+transactions.csv: every entry dated in the year, voided ones included. Columns: id (the entry number); date; kind (expense or income); description; amount (dollars); amount_cents; category_key (the current category); category_label (its plain name); schedule_c_line (the Schedule C line, blank for uncategorized); is_asset (yes if it is equipment or property kept longer than a year); income_source (who paid, for income); status (active or voided); voided_reason (why it was voided); replaces_id (the older entry this one replaced); replaced_by_id (the newer entry that replaced this one); original_category_key (the category when first recorded); recorded_at (when it was entered, UTC); payment_method (the nickname of the card, bank account or cash it was paid with, blank if none was set); payment_method_last4 (the last 4 digits of that card or account, blank if none; Freehold Ledger never keeps a full card or account number, and a spreadsheet may drop a leading zero).\n\n\
 expenses-by-category.csv: active expenses added up by category, in Schedule C line order with uncategorized last. Columns: schedule_c_line; category_key; category_label; total (dollars); total_cents; count (number of entries).\n\n\
 income-by-source.csv: active income added up by who paid. Columns: income_source; category_key (income category); total (dollars); total_cents; count.\n\n\
 assets.csv: active expenses marked as assets, listed one per row. Columns: id; date; description; amount (dollars); category_key; schedule_c_line. Freehold Ledger does not compute depreciation.\n\n\
@@ -317,7 +319,7 @@ fn write_all(
         &[
             "id", "date", "kind", "description", "amount", "amount_cents", "category_key", "category_label",
             "schedule_c_line", "is_asset", "income_source", "status", "voided_reason", "replaces_id",
-            "replaced_by_id", "original_category_key", "recorded_at",
+            "replaced_by_id", "original_category_key", "recorded_at", "payment_method", "payment_method_last4",
         ],
         &f.transactions,
     )?;

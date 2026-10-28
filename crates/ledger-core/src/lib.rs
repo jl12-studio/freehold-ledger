@@ -23,5 +23,5 @@ pub use model::{
 pub use export::ExportResult;
 pub use guard::{check_no_full_number, MIN_FULL_NUMBER_DIGITS};
 pub use ops::parse_date;
-pub use seed::seed_demo;
+pub use seed::{seed_demo, seed_demo_payment_methods};
 pub use summary::{resolve_period, CategoryTotal, Period, PaymentMethodTotal, SourceTotal, Summary, SummaryRequest, Totals};

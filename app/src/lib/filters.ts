@@ -6,6 +6,7 @@ export interface FilterState {
   kind: "" | KindName;
   category: string;
   source: string;
+  payment_method: string;
   include_voided: boolean;
 }
 
@@ -15,6 +16,7 @@ export const DEFAULT_FILTERS: FilterState = {
   kind: "",
   category: "",
   source: "",
+  payment_method: "",
   include_voided: true,
 };
 
@@ -30,5 +32,6 @@ export function toFilter(f: FilterState): Filter {
   if (f.kind) out.kind = f.kind;
   if (f.category) out.category = f.category;
   if (f.source) out.source = f.source;
+  if (f.payment_method) out.payment_method = f.payment_method;
   return out;
 }

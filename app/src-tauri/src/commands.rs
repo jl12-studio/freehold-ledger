@@ -1,4 +1,6 @@
-use ledger_core::{Category, Filter, Kind, Ledger, LedgerError, LedgerInfo, Transaction};
+use ledger_core::{
+    Category, Filter, Kind, Ledger, LedgerError, LedgerInfo, PaymentMethod, PaymentMethodFilter, Transaction,
+};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tauri::State;
@@ -61,6 +63,7 @@ pub struct FilterDto {
     pub kind: Option<String>,
     pub category: Option<String>,
     pub source: Option<String>,
+    pub payment_method: Option<String>,
     #[serde(default)]
     pub include_voided: bool,
 }
@@ -79,6 +82,16 @@ impl FilterDto {
                 return Err(LedgerError::InvalidDate(format!("kind {other}")));
             }
         };
+        let payment_method = match non_empty(&self.payment_method) {
+            None => None,
+            Some("none") => Some(PaymentMethodFilter::Unassigned),
+            Some(other) => match other.parse::<i64>() {
+                Ok(n) => Some(PaymentMethodFilter::Id(n)),
+                Err(_) => {
+                    return Err(LedgerError::InvalidDate(format!("payment method {other}")));
+                }
+            },
+        };
         Ok(Filter {
             from: non_empty(&self.from).map(ledger_core::parse_date).transpose()?,
             to: non_empty(&self.to).map(ledger_core::parse_date).transpose()?,
@@ -87,7 +100,7 @@ impl FilterDto {
             source: non_empty(&self.source).map(str::to_string),
             is_asset: None,
             batch_id: None,
-            payment_method: None,
+            payment_method,
             include_voided: self.include_voided,
             limit: None,
         })
@@ -133,6 +146,11 @@ pub fn list_categories() -> Vec<Category> {
 #[tauri::command]
 pub fn list_income_sources(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
     with_ledger(&state, |l| l.income_sources())
+}
+
+#[tauri::command]
+pub fn list_payment_methods(state: State<'_, AppState>) -> Result<Vec<PaymentMethod>, AppError> {
+    with_ledger(&state, |l| l.payment_methods(true))
 }
 
 /// Current calendar year (UTC), from the system clock.
@@ -269,6 +287,17 @@ mod tests {
     fn bad_filter_date_is_invalid_input() {
         let dto = FilterDto { from: Some("07/01/2026".into()), ..Default::default() };
         let err = dto.to_filter().unwrap_err();
+        let path = std::path::PathBuf::from("/x");
+        assert_eq!(AppError::from_ledger(&err, &path).kind, "invalid_input");
+    }
+
+    #[test]
+    fn payment_method_filter_parses() {
+        let mk = |v: &str| FilterDto { payment_method: Some(v.into()), ..Default::default() };
+        assert_eq!(mk("none").to_filter().unwrap().payment_method, Some(PaymentMethodFilter::Unassigned));
+        assert_eq!(mk("3").to_filter().unwrap().payment_method, Some(PaymentMethodFilter::Id(3)));
+        assert_eq!(mk("").to_filter().unwrap().payment_method, None);
+        let err = mk("visa").to_filter().unwrap_err();
         let path = std::path::PathBuf::from("/x");
         assert_eq!(AppError::from_ledger(&err, &path).kind, "invalid_input");
     }

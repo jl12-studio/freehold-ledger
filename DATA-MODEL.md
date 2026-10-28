@@ -131,7 +131,7 @@ The file is now schema 3; files from schema 1 or 2 upgrade automatically when op
 
 Exporting a tax year writes a new folder named `Freehold Ledger <year> export/`, by default under `Documents/Freehold Ledger/exports/`. If that folder already exists, a ` (2)`, ` (3)` suffix is added; nothing is overwritten. Inside:
 
-- `transactions.csv`: every transaction for the year, with a header row.
+- `transactions.csv`: every transaction for the year, with a header row, including each entry's payment method nickname and last 4 digits.
 - `expenses-by-category.csv`: expense totals per category, with the Schedule C line.
 - `income-by-source.csv`: income totals per source.
 - `assets.csv`: the entries marked as assets, listed separately.

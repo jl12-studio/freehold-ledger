@@ -51,7 +51,7 @@ fn s_exp_1_seed_2026_export_matches_summarize() {
     let (h, rows) = read_csv(&r.folder.join("transactions.csv"));
     assert_eq!(
         h.join(","),
-        "id,date,kind,description,amount,amount_cents,category_key,category_label,schedule_c_line,is_asset,income_source,status,voided_reason,replaces_id,replaced_by_id,original_category_key,recorded_at"
+        "id,date,kind,description,amount,amount_cents,category_key,category_label,schedule_c_line,is_asset,income_source,status,voided_reason,replaces_id,replaced_by_id,original_category_key,recorded_at,payment_method,payment_method_last4"
     );
     assert_eq!(rows.len(), 9);
     let status = col(&h, "status");
@@ -202,4 +202,29 @@ fn readme_alone_answers_line_22_and_which_entries_are_assets() {
     let empty = l.export_tax_year(2024, Some(out.path())).unwrap();
     let readme = std::fs::read_to_string(empty.folder.join("README.txt")).unwrap();
     assert_eq!(readme.matches("- None.").count(), 3, "{readme}");
+}
+
+#[test]
+fn s_exp_5_transactions_csv_names_the_payment_method() {
+    use ledger_core::{NewPaymentMethod, PaymentKind, PaymentMethodKey};
+    let (_d, mut l) = common::seeded();
+    l.create_payment_method(NewPaymentMethod { kind: PaymentKind::Card, nickname: "Business Visa".into(), last4: Some("4242".into()), make_default: false }).unwrap();
+    l.create_payment_method(NewPaymentMethod { kind: PaymentKind::Cash, nickname: "Cash".into(), last4: None, make_default: false }).unwrap();
+    l.assign_payment_method(&PaymentMethodKey::Nickname("Business Visa".into()), &[1, 10]).unwrap();
+    l.assign_payment_method(&PaymentMethodKey::Nickname("Cash".into()), &[4]).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let r = l.export_tax_year(2026, Some(out.path())).unwrap();
+    let (h, rows) = read_csv(&r.folder.join("transactions.csv"));
+    let (id, pm, l4) = (col(&h, "id"), col(&h, "payment_method"), col(&h, "payment_method_last4"));
+    let cell = |n: &str, c: usize| rows.iter().find(|r| r[id] == n).unwrap()[c].clone();
+    assert_eq!((cell("1", pm), cell("1", l4)), ("Business Visa".to_string(), "4242".to_string()));
+    assert_eq!((cell("10", pm), cell("10", l4)), ("Business Visa".to_string(), "4242".to_string()));
+    assert_eq!((cell("4", pm), cell("4", l4)), ("Cash".to_string(), String::new()));
+    assert_eq!((cell("5", pm), cell("5", l4)), (String::new(), String::new()));
+    let readme = std::fs::read_to_string(r.folder.join("README.txt")).unwrap();
+    assert!(readme.contains("payment_method_last4"));
+    assert!(!readme.contains('\u{2014}'));
+    let j: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(r.folder.join("summary.json")).unwrap()).unwrap();
+    assert!(j.get("by_payment_method").is_none());
 }

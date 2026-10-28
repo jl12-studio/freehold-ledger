@@ -54,7 +54,7 @@ The app shows each entry's payment method in its own column, and you can filter 
 Press Export in the app (or ask your agent for your books for the year). It creates a folder such as "Freehold Ledger 2026 export" (with the year you chose) in Documents/Freehold Ledger/exports. Inside:
 
 - `README.txt` explaining every file in plain words
-- `transactions.csv`, every entry for the year, voided ones marked
+- `transactions.csv`, every entry for the year, voided ones marked, with the payment method and its last 4 digits so your preparer can match entries to statements
 - `expenses-by-category.csv`, spending by Schedule C line
 - `income-by-source.csv`, who paid you and how much
 - `assets.csv`, equipment you kept over a year (no depreciation is calculated)

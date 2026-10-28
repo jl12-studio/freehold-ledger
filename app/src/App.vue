@@ -10,10 +10,11 @@ import {
   getLedgerInfo,
   listCategories,
   listIncomeSources,
+  listPaymentMethods,
   listTransactions,
   revealLedger,
 } from "./lib/api";
-import type { AppError, Category, LedgerInfo, Transaction } from "./lib/api";
+import type { AppError, Category, LedgerInfo, PaymentMethod, Transaction } from "./lib/api";
 import { DEFAULT_FILTERS, isDirty, toFilter } from "./lib/filters";
 import type { FilterState } from "./lib/filters";
 
@@ -33,6 +34,7 @@ const filters = ref<FilterState>({ ...DEFAULT_FILTERS });
 const rows = ref<Transaction[]>([]);
 const categories = ref<Category[]>([]);
 const sources = ref<string[]>([]);
+const paymentMethods = ref<PaymentMethod[]>([]);
 const listError = ref<string | null>(null);
 let fetchToken = 0;
 let inflight: Promise<void> = Promise.resolve();
@@ -106,9 +108,10 @@ onMounted(async () => {
   try {
     info.value = await getLedgerInfo();
     if (info.value.transaction_count > 0) {
-      const [cats, srcs] = await Promise.all([listCategories(), listIncomeSources()]);
+      const [cats, srcs, pms] = await Promise.all([listCategories(), listIncomeSources(), listPaymentMethods()]);
       categories.value = cats;
       sources.value = srcs;
+      paymentMethods.value = pms;
       await refetch();
     }
   } catch (e) {
@@ -140,7 +143,7 @@ onBeforeUnmount(() => clearTimeout(loadingTimer));
     <EmptyState v-else-if="state === 'empty'" @reveal="reveal" @connect="connect" />
     <section v-else-if="state === 'ready' && info" class="max-w-page mx-auto px-6 pt-8 pb-16">
       <p class="sr-only">Your ledger is open.</p>
-      <LedgerFilters v-model="filters" :categories="categories" :sources="sources" @clear="clearFilters" />
+      <LedgerFilters v-model="filters" :categories="categories" :sources="sources" :payment-methods="paymentMethods" @clear="clearFilters" />
       <p v-if="listError" role="alert" class="pb-4 text-ui">{{ listError }}</p>
       <LedgerTable v-if="rows.length > 0" :rows="rows" :categories="categories" @goto="goTo" />
       <div v-else-if="!listError" class="pt-8">
