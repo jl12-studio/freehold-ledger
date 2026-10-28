@@ -18,13 +18,13 @@ Freehold Ledger follows the Freehold Standard. Read more at:
 
 The Standard points this app is built around:
 
-1. Free, and owned by the person.
-3. Speaks MCP natively.
-5. A declared conflict story.
-7. Secure by default.
-8. Self-carrying upgrades.
-9. Usable by conversation.
-10. Teaches while it works.
+- Point 1: Free, and owned by the person.
+- Point 3: Speaks MCP natively.
+- Point 5: A declared conflict story.
+- Point 7: Secure by default.
+- Point 8: Self-carrying upgrades.
+- Point 9: Usable by conversation.
+- Point 10: Teaches while it works.
 
 ## Status
 

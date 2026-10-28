@@ -12,7 +12,7 @@ defineEmits<{ reveal: [] }>();
     <p class="mt-3 text-ui text-muted">
       <span class="font-mono break-all">{{ error.path }}</span>
     </p>
-    <p class="mt-3 font-serif text-body">Nothing was changed.</p>
+    <p v-if="!error.message.includes('Nothing was changed.')" class="mt-3 font-serif text-body">Nothing was changed.</p>
     <button
       type="button"
       class="mt-6 min-h-8 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"

@@ -116,6 +116,47 @@ fn s_imm_1_transactions_are_append_only() {
 }
 
 #[test]
+fn s_imm_2_insert_or_replace_cannot_rewrite_append_only_rows() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    let mut l = Ledger::open(&path).unwrap();
+    let t = l
+        .record_expense(ledger_core::NewExpense {
+            occurred_on: None,
+            amount_cents: 3000,
+            description: "Device".into(),
+            category: "supplies".into(),
+            is_asset: false,
+        })
+        .unwrap();
+    l.reclassify(t.id, "office_expense", "desk lamp").unwrap();
+    l.void(t.id, "duplicate").unwrap();
+    let c = raw(&path);
+    for (table, sql) in [
+        (
+            "transactions",
+            "INSERT OR REPLACE INTO transactions (id, kind, occurred_on, amount_cents, description, category, recorded_at) \
+             VALUES (1, 'expense', '2026-01-02', 999999, 'rewritten', 'supplies', 'x')",
+        ),
+        ("voids", "REPLACE INTO voids (transaction_id, reason, recorded_at) VALUES (1, 'rewritten', 'x')"),
+        ("voids", "INSERT OR REPLACE INTO voids (id, transaction_id, reason, recorded_at) VALUES (1, 1, 'rewritten', 'x')"),
+        (
+            "classification_changes",
+            "INSERT OR REPLACE INTO classification_changes (id, transaction_id, category, reason, recorded_at) \
+             VALUES (1, 1, 'supplies', 'rewritten', 'x')",
+        ),
+    ] {
+        let e = c.execute(sql, []).unwrap_err();
+        assert!(e.to_string().contains(&format!("{table} are append-only")), "{sql}: {e}");
+    }
+    let after = l.get(t.id).unwrap();
+    assert_eq!(after.amount_cents, 3000);
+    assert_eq!(after.description, "Device");
+    assert_eq!(after.void.unwrap().reason, "duplicate");
+    assert_eq!(after.classification_history[0].reason, "desk lamp");
+}
+
+#[test]
 fn resolve_db_path_honors_env() {
     // The only test in this binary that touches the env var.
     let prev = std::env::var_os("FREEHOLD_LEDGER_DB");

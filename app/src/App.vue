@@ -34,8 +34,24 @@ const categories = ref<Category[]>([]);
 const sources = ref<string[]>([]);
 const listError = ref<string | null>(null);
 let fetchToken = 0;
+let inflight: Promise<void> = Promise.resolve();
 
-async function refetch() {
+function refetch(): Promise<void> {
+  inflight = fetchRows();
+  return inflight;
+}
+
+/** Wait for the filter watcher's refetch, and any that superseded it, to land. */
+async function settle() {
+  await nextTick();
+  let p: Promise<void>;
+  do {
+    p = inflight;
+    await p;
+  } while (p !== inflight);
+}
+
+async function fetchRows() {
   const token = ++fetchToken;
   try {
     const result = await listTransactions(toFilter(filters.value));
@@ -54,13 +70,14 @@ function clearFilters() {
 
 async function goTo(id: number) {
   // Make sure the target row can be on screen, then focus it.
+  // The filters watcher does the refetch; a second one here would be discarded as stale.
   if (!filters.value.include_voided) {
     filters.value = { ...filters.value, include_voided: true };
-    await refetch();
+    await settle();
   }
   if (!rows.value.some((r) => r.id === id) && isDirty(filters.value)) {
     clearFilters();
-    await refetch();
+    await settle();
   }
   await nextTick();
   const el = document.getElementById(`tx-${id}`);

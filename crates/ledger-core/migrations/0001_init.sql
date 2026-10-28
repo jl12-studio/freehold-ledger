@@ -45,3 +45,14 @@ CREATE TRIGGER classification_changes_no_update BEFORE UPDATE ON classification_
 BEGIN SELECT RAISE(ABORT, 'classification_changes are append-only'); END;
 CREATE TRIGGER classification_changes_no_delete BEFORE DELETE ON classification_changes
 BEGIN SELECT RAISE(ABORT, 'classification_changes are append-only'); END;
+-- INSERT OR REPLACE deletes the conflicting row without firing BEFORE DELETE
+-- (recursive_triggers is off), so an insert that would collide is refused too.
+CREATE TRIGGER transactions_no_replace BEFORE INSERT ON transactions
+WHEN EXISTS (SELECT 1 FROM transactions WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'transactions are append-only'); END;
+CREATE TRIGGER voids_no_replace BEFORE INSERT ON voids
+WHEN EXISTS (SELECT 1 FROM voids WHERE id = NEW.id OR transaction_id = NEW.transaction_id)
+BEGIN SELECT RAISE(ABORT, 'voids are append-only'); END;
+CREATE TRIGGER classification_changes_no_replace BEFORE INSERT ON classification_changes
+WHEN EXISTS (SELECT 1 FROM classification_changes WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'classification_changes are append-only'); END;

@@ -48,7 +48,7 @@ describe("Freehold Ledger window", () => {
     expect(wrapper.text()).toContain("This ledger could not be opened");
     expect(wrapper.text()).toContain(message);
     expect(wrapper.text()).toContain(PATH);
-    expect(wrapper.text()).toContain("Nothing was changed.");
+    expect(wrapper.text().split("Nothing was changed.").length - 1).toBe(1);
     expect(wrapper.text()).not.toContain("Your ledger is ready");
     expect(wrapper.text()).toContain("Show in Finder");
   });
@@ -93,6 +93,29 @@ describe("Freehold Ledger window", () => {
 
     expect(wrapper.find("table").exists()).toBe(true);
     expect(wrapper.text()).not.toContain("Your ledger is ready");
+  });
+
+  it("trail_link_to_a_hidden_voided_entry_shows_and_focuses_it", async () => {
+    // Real IPC answers on a later task, not in the same microtask turn.
+    const settle = () => new Promise((r) => setTimeout(r, 20));
+    invoke.mockImplementation(
+      (cmd: string, args?: unknown) =>
+        new Promise((r) => setTimeout(() => r(seedInvoke(cmd, args as never)), 1)),
+    );
+    const wrapper = mount(App, { attachTo: document.body });
+    await settle();
+
+    await wrapper.find('input[type="checkbox"]').setValue(false);
+    await settle();
+    expect(wrapper.find("#tx-7").exists()).toBe(false);
+
+    const link = wrapper.findAll("button").find((b) => b.text() === "Corrects entry #7")!;
+    await link.trigger("click");
+    await settle();
+
+    expect(wrapper.find("#tx-7").exists()).toBe(true);
+    expect(document.activeElement?.id).toBe("tx-7");
+    wrapper.unmount();
   });
 
   it("loading_caption_appears_only_after_300ms", async () => {
