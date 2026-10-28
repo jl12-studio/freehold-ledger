@@ -52,12 +52,15 @@ fn ok_json(r: &CallToolResult) -> Value {
     serde_json::from_str(&text(r)).expect("success content is JSON text")
 }
 
-const TOOLS: [&str; 18] = [
+const TOOLS: [&str; 25] = [
+    "archive_business",
     "assign_payment_method",
     "correct_transaction",
+    "create_business",
     "create_payment_method",
     "export_tax_year",
     "ledger_info",
+    "list_businesses",
     "list_categories",
     "list_payment_methods",
     "list_transactions",
@@ -65,10 +68,14 @@ const TOOLS: [&str; 18] = [
     "record_expense",
     "record_income",
     "record_transactions",
+    "rename_business",
     "rename_payment_method",
+    "restore_business",
     "retire_payment_method",
     "set_default_payment_method",
     "summarize",
+    "switch_business",
+    "update_business",
     "void_batch",
     "void_transaction",
 ];
@@ -196,7 +203,7 @@ async fn s_mcp_2_scene_and_corrections_via_tools_only() {
     let cable_id = cable["id"].as_i64().unwrap();
     let voided = ok_json(&call(&client, "void_transaction", json!({ "id": cable_id, "reason": "Entered twice" })).await);
     assert_eq!(voided["void"]["reason"], "Entered twice");
-    assert!(voided["note"].as_str().unwrap().starts_with("Voided, not deleted"));
+    assert!(voided["note"].as_str().unwrap().starts_with("In My business: Voided, not deleted"));
     let visible = ok_json(&call(&client, "list_transactions", json!({})).await);
     assert!(!ids(&visible).contains(&cable_id));
     let all = ok_json(&call(&client, "list_transactions", json!({ "include_voided": true })).await);
@@ -752,7 +759,7 @@ async fn s_mcp_11_assign_one_and_many() {
     let v = ok_json(&call(&client, "assign_payment_method", json!({ "payment_method": "Checking", "ids": [2, 3] })).await);
     assert_eq!(v["assigned_count"], 0);
     assert_eq!(v["unchanged_count"], 2);
-    assert!(note(&v).starts_with("Nothing changed"), "{}", note(&v));
+    assert!(note(&v).starts_with("In My business: Nothing changed"), "{}", note(&v));
 
     let v = ok_json(&call(&client, "list_transactions", json!({ "payment_method": "Checking" })).await);
     let mut got = txn_ids(&v);
@@ -878,5 +885,257 @@ async fn s_mcp_17_rename_letter_case() {
     let n = note(&v);
     assert!(n.contains("already has that name") && n.contains("nothing changed"), "{n}");
     assert!(!n.contains("Renamed"), "{n}");
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_17_business_tools_are_listed_with_schemas() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let tools = client.list_all_tools().await.unwrap();
+    assert_eq!(tools.len(), 25);
+    let fields = |name: &str| -> Vec<String> {
+        let t = tools.iter().find(|t| t.name == name).unwrap_or_else(|| panic!("{name} missing"));
+        let mut f: Vec<String> = t
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default();
+        f.sort();
+        f
+    };
+    assert_eq!(fields("create_business"), ["is_test", "name", "note", "switch_to"]);
+    assert_eq!(fields("list_businesses"), ["include_archived"]);
+    assert_eq!(fields("switch_business"), ["business"]);
+    assert_eq!(fields("rename_business"), ["business", "name"]);
+    assert_eq!(fields("update_business"), ["business", "clear_note", "is_test", "note"]);
+    assert_eq!(fields("archive_business"), ["business"]);
+    assert_eq!(fields("restore_business"), ["business"]);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_18_create_a_test_business_then_switch() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let v = ok_json(&call(&client, "create_business", json!({ "name": "Test shop", "is_test": true })).await);
+    assert_eq!(v["is_test"], true);
+    assert_eq!(v["is_current"], false);
+    assert_eq!(
+        note(&v),
+        "Created Test shop (a test business). New entries still go to My business; say \"switch to Test shop\" to record there."
+    );
+    let v = ok_json(&call(&client, "switch_business", json!({ "business": "test shop" })).await);
+    assert_eq!(note(&v), "New entries now go to Test shop (test business).");
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["current_business"]["name"], "Test shop");
+    assert_eq!(info["businesses"].as_array().unwrap().len(), 2);
+    assert!(note(&info).contains("in 2 businesses; new entries go to Test shop"), "{}", note(&info));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_19_business_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_business", json!({ "name": "Test shop" })).await);
+
+    let r = call(&client, "create_business", json!({ "name": "test SHOP" })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("A business called \"Test shop\" already exists"), "{}", text(&r));
+
+    let r = call(&client, "create_business", json!({ "name": "Acct 4242 4242 4242 4242" })).await;
+    assert!(is_error(&r));
+    assert!(!text(&r).contains("4242"), "{}", text(&r));
+
+    let r = call(&client, "switch_business", json!({ "business": "Nope" })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("No business matches \"Nope\". Call list_businesses"), "{}", text(&r));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_20_rename_and_update_business() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_business", json!({ "name": "Test shop", "is_test": true })).await);
+
+    let v = ok_json(&call(&client, "rename_business", json!({ "business": "Test shop", "name": "Trial shop" })).await);
+    assert_eq!(note(&v), "Renamed Test shop to Trial shop.");
+    let v = ok_json(&call(&client, "rename_business", json!({ "business": "Trial shop", "name": "Trial shop" })).await);
+    assert_eq!(note(&v), "Trial shop already has that name.");
+
+    let v = ok_json(&call(&client, "update_business", json!({ "business": "Trial shop", "note": "Scratch space" })).await);
+    assert_eq!(note(&v), "Updated Trial shop: note set.");
+    let v = ok_json(&call(&client, "update_business", json!({ "business": "Trial shop", "clear_note": true })).await);
+    assert_eq!(note(&v), "Updated Trial shop: note cleared.");
+    let v = ok_json(&call(&client, "list_businesses", json!({})).await);
+    assert!(v["businesses"].as_array().unwrap().iter().all(|b| b["note"].is_null()));
+    let v = ok_json(&call(&client, "update_business", json!({ "business": "Trial shop", "is_test": false })).await);
+    assert_eq!(v["is_test"], false);
+    assert_eq!(note(&v), "Updated Trial shop: marked as a real business.");
+    let v = ok_json(&call(&client, "update_business", json!({ "business": 2, "is_test": true })).await);
+    assert_eq!(note(&v), "Updated Trial shop: marked as a test business.");
+
+    let r = call(&client, "update_business", json!({ "business": "Trial shop" })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("Give a note, clear_note or is_test to change."), "{}", text(&r));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_21_archive_and_restore_business() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_business", json!({ "name": "Test shop", "is_test": true, "switch_to": true })).await);
+
+    let v = ok_json(&call(&client, "archive_business", json!({ "business": "Test shop" })).await);
+    assert_eq!(
+        note(&v),
+        "Archived Test shop; nothing was deleted. No business is current now: say which one to record in."
+    );
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert!(info["current_business"].is_null());
+    assert!(note(&info).contains("switch_business"), "{}", note(&info));
+
+    let v = ok_json(&call(&client, "list_businesses", json!({})).await);
+    assert_eq!(v["count"], 1);
+    assert!(note(&v).contains("None is current: call switch_business"), "{}", note(&v));
+    let v = ok_json(&call(&client, "list_businesses", json!({ "include_archived": true })).await);
+    assert_eq!(v["count"], 2);
+
+    let v = ok_json(&call(&client, "restore_business", json!({ "business": "Test shop" })).await);
+    assert_eq!(note(&v), "Restored Test shop.");
+    assert_eq!(v["is_current"], false);
+    assert_eq!(v["archived"], false);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_22_recording_names_the_current_business() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let v = ok_json(&call(&client, "record_expense", json!({ "amount": "300", "description": "Device", "category": "supplies" })).await);
+    assert_eq!(v["business"]["name"], "My business");
+    assert_eq!(v["business"]["is_test"], false);
+    assert!(v["business"]["id"].is_i64());
+    assert!(note(&v).starts_with("In My business: Recorded on"), "{}", note(&v));
+
+    let v = ok_json(&call(&client, "summarize", json!({ "period": "this_year" })).await);
+    assert_eq!(v["business"]["name"], "My business");
+    assert!(note(&v).starts_with("In My business: "), "{}", note(&v));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_23_one_call_in_another_business_without_switching() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_business", json!({ "name": "Test shop", "is_test": true })).await);
+    let mine = ok_json(&call(&client, "record_expense", json!({ "amount": "10", "description": "Mine", "category": "supplies" })).await);
+    let v = ok_json(&call(&client, "record_expense", json!({ "amount": "20", "description": "Theirs", "category": "supplies", "business": "Test shop" })).await);
+    assert_eq!(v["business"]["name"], "Test shop");
+    assert_eq!(v["business"]["is_test"], true);
+    assert!(note(&v).starts_with("In Test shop (test business): "), "{}", note(&v));
+    let theirs_id = v["id"].as_i64().unwrap();
+
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["current_business"]["name"], "My business");
+
+    let l = ok_json(&call(&client, "list_transactions", json!({})).await);
+    assert_eq!(txn_ids(&l), vec![mine["id"].as_i64().unwrap()]);
+    assert_eq!(l["business"]["name"], "My business");
+    let l = ok_json(&call(&client, "list_transactions", json!({ "business": "Test shop" })).await);
+    assert_eq!(txn_ids(&l), vec![theirs_id]);
+    assert_eq!(l["business"]["name"], "Test shop");
+
+    let b = ok_json(&call(&client, "record_transactions", json!({ "label": "f.csv", "business": "Test shop", "entries": [{ "kind": "expense", "amount": "5", "description": "Row", "date": "2026-03-01", "category": "supplies" }] })).await);
+    assert_eq!(b["business"]["name"], "Test shop");
+    assert!(note(&b).starts_with("In Test shop (test business): "), "{}", note(&b));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_24_no_current_or_archived_business_records_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "archive_business", json!({ "business": "My business" })).await);
+
+    let r = call(&client, "record_income", json!({ "amount": "100", "description": "Job", "source": "Upwork" })).await;
+    assert!(is_error(&r));
+    assert_eq!(text(&r), ledger_core::LedgerError::NoCurrentBusiness.to_string());
+
+    let r = call(&client, "record_income", json!({ "amount": "100", "description": "Job", "source": "Upwork", "business": "My business" })).await;
+    assert!(is_error(&r));
+    assert_eq!(text(&r), ledger_core::LedgerError::ArchivedBusiness("My business".into()).to_string());
+
+    let l = ok_json(&call(&client, "list_transactions", json!({ "business": "My business" })).await);
+    assert_eq!(l["count"], 0);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_25_id_based_tools_name_the_entrys_business() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_business", json!({ "name": "Test shop", "is_test": true })).await);
+    let e = ok_json(&call(&client, "record_expense", json!({ "amount": "20", "description": "Theirs", "category": "supplies", "business": "Test shop" })).await);
+    let id = e["id"].as_i64().unwrap();
+
+    let v = ok_json(&call(&client, "reclassify_transaction", json!({ "id": id, "category": "travel", "reason": "Trip" })).await);
+    assert_eq!(v["business"]["name"], "Test shop");
+    assert!(note(&v).starts_with("In Test shop (test business): Reclassified"), "{}", note(&v));
+    let v = ok_json(&call(&client, "correct_transaction", json!({ "id": id, "reason": "Typo", "amount": "25" })).await);
+    assert!(note(&v).starts_with("In Test shop (test business): Corrected"), "{}", note(&v));
+    let new_id = v["replacement"]["id"].as_i64().unwrap();
+    let v = ok_json(&call(&client, "void_transaction", json!({ "id": new_id, "reason": "Mistake" })).await);
+    assert!(note(&v).starts_with("In Test shop (test business): Voided, not deleted"), "{}", note(&v));
+    assert_eq!(v["business"]["is_test"], true);
+
+    let b = ok_json(&call(&client, "record_transactions", json!({ "label": "f.csv", "business": "Test shop", "entries": [{ "kind": "expense", "amount": "5", "description": "Row", "date": "2026-03-01", "category": "supplies" }] })).await);
+    let v = ok_json(&call(&client, "void_batch", json!({ "batch_id": b["batch_id"], "reason": "Wrong file" })).await);
+    assert!(note(&v).starts_with("In Test shop (test business): Voided 1 entries"), "{}", note(&v));
+    assert_eq!(v["business"]["name"], "Test shop");
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_26_payment_methods_and_export_follow_the_named_business() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_business", json!({ "name": "Test shop", "is_test": true })).await);
+    let v = ok_json(&call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "Business Visa", "last4": "1111" })).await);
+    assert_eq!(v["business"]["name"], "My business");
+    let first_id = v["id"].as_i64().unwrap();
+
+    let v = ok_json(&call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "Business Visa", "last4": "1111", "business": "Test shop" })).await);
+    assert_eq!(v["business"]["name"], "Test shop");
+    assert!(note(&v).starts_with("In Test shop (test business): Saved"), "{}", note(&v));
+
+    let v = ok_json(&call(&client, "list_payment_methods", json!({ "business": "Test shop" })).await);
+    assert_eq!(v["count"], 1);
+    assert_ne!(v["payment_methods"][0]["id"].as_i64().unwrap(), first_id);
+    assert_eq!(v["business"]["name"], "Test shop");
+
+    let e = ok_json(&call(&client, "record_expense", json!({ "amount": "20", "description": "Theirs", "category": "supplies", "date": "2026-03-01", "business": "Test shop" })).await);
+    let r = call(&client, "assign_payment_method", json!({ "payment_method": first_id, "ids": [e["id"]], "business": "Test shop" })).await;
+    assert!(is_error(&r));
+    assert_eq!(
+        text(&r),
+        ledger_core::LedgerError::PaymentMethodInOtherBusiness { nickname: "Business Visa".into(), business: "My business".into() }.to_string()
+    );
+
+    let v = ok_json(&call(&client, "rename_payment_method", json!({ "payment_method": "Business Visa", "nickname": "Shop Visa", "business": "Test shop" })).await);
+    assert!(note(&v).starts_with("In Test shop (test business): "), "{}", note(&v));
+    let v = ok_json(&call(&client, "set_default_payment_method", json!({ "payment_method": "Shop Visa", "business": "Test shop" })).await);
+    assert!(note(&v).starts_with("In Test shop (test business): "), "{}", note(&v));
+    let v = ok_json(&call(&client, "retire_payment_method", json!({ "payment_method": "Shop Visa", "business": "Test shop" })).await);
+    assert!(note(&v).starts_with("In Test shop (test business): "), "{}", note(&v));
+
+    let dest = tempfile::tempdir().unwrap();
+    let v = ok_json(&call(&client, "export_tax_year", json!({ "year": 2026, "destination": dest.path().to_str().unwrap(), "business": "Test shop" })).await);
+    assert!(v["folder"].as_str().unwrap().ends_with("Freehold Ledger Test shop (test) 2026 export"), "{}", v["folder"]);
+    assert!(note(&v).starts_with("In Test shop (test business): "), "{}", note(&v));
     client.cancel().await.ok();
 }

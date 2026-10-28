@@ -29,11 +29,13 @@ fn data_model_lists_every_category_key() {
     }
 }
 
-const TOOLS: [&str; 18] = [
-    "assign_payment_method", "correct_transaction", "create_payment_method", "export_tax_year",
-    "ledger_info", "list_categories", "list_payment_methods", "list_transactions",
-    "reclassify_transaction", "record_expense", "record_income", "record_transactions",
-    "rename_payment_method", "retire_payment_method", "set_default_payment_method", "summarize",
+const TOOLS: [&str; 25] = [
+    "archive_business", "assign_payment_method", "correct_transaction", "create_business",
+    "create_payment_method", "export_tax_year", "ledger_info", "list_businesses",
+    "list_categories", "list_payment_methods", "list_transactions", "reclassify_transaction",
+    "record_expense", "record_income", "record_transactions", "rename_business",
+    "rename_payment_method", "restore_business", "retire_payment_method",
+    "set_default_payment_method", "summarize", "switch_business", "update_business",
     "void_batch", "void_transaction",
 ];
 
@@ -56,6 +58,17 @@ fn guides_have_no_em_dash() {
 fn data_model_names_payment_method_tables() {
     let doc = repo_file("DATA-MODEL.md");
     for t in ["payment_methods", "payment_method_changes", "default_payment_method_changes", "payment_method_assignments"] {
+        assert!(doc.contains(&format!("`{t}`")), "DATA-MODEL.md is missing {t}");
+    }
+}
+
+#[test]
+fn data_model_names_business_tables() {
+    let doc = repo_file("DATA-MODEL.md");
+    for t in [
+        "businesses", "business_changes", "current_business_changes", "transaction_businesses",
+        "batch_businesses", "payment_method_businesses", "business_default_payment_method_changes",
+    ] {
         assert!(doc.contains(&format!("`{t}`")), "DATA-MODEL.md is missing {t}");
     }
 }

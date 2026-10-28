@@ -226,6 +226,8 @@ struct RecordExpenseInput {
     is_asset: Option<bool>,
     /// The card, account or cash it was paid with: nickname or id. Omit to use the default payment method, if one is set.
     payment_method: Option<PaymentMethodArg>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -243,6 +245,8 @@ struct RecordIncomeInput {
     date: Option<String>,
     /// The account or method the money came into: nickname or id. Omit for none; income never uses the default.
     payment_method: Option<PaymentMethodArg>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -254,6 +258,8 @@ struct RecordTransactionsInput {
     entries: Vec<BatchEntryInput>,
     /// Payment method for every entry in this batch, for example the card the statement is for. An entry's own payment_method wins. Expenses with neither use the default.
     payment_method: Option<PaymentMethodArg>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -352,6 +358,8 @@ struct ListTransactionsInput {
     include_voided: Option<bool>,
     /// Most entries to return, newest first. Defaults to 50; the maximum is 500.
     limit: Option<u32>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -413,6 +421,8 @@ struct AssignPaymentMethodInput {
     payment_method: PaymentMethodArg,
     /// Ids of the entries, 1 to 200. list_transactions finds them.
     ids: Vec<i64>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -459,6 +469,8 @@ struct SummarizeInput {
     is_asset: Option<bool>,
     /// Only entries on this payment method (nickname or id), or "none" for entries with no payment method.
     payment_method: Option<PaymentMethodArg>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 /// Add a dollar-formatted sibling for every `*_cents` number, for example `profit_cents` -> `profit`.
@@ -489,6 +501,8 @@ struct ExportInput {
     year: i32,
     /// Absolute path of the folder to create the export inside. Omit for Documents/Freehold Ledger/exports.
     destination: Option<String>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 fn with_note(mut v: Value, note: impl Into<String>) -> Value {
@@ -564,14 +578,14 @@ fn method_sentence(t: &ledger_core::Transaction, used_default: bool, kept: bool)
 }
 
 /// A filter argument: "none" (any case) means entries without a payment method.
-fn filter_arg(l: &Ledger, a: PaymentMethodArg) -> Result<ledger_core::PaymentMethodFilter, ToolError> {
+fn filter_arg(l: &Ledger, biz: &ledger_core::Business, a: PaymentMethodArg) -> Result<ledger_core::PaymentMethodFilter, ToolError> {
     if let PaymentMethodArg::Nickname(s) = &a {
         if s.trim().eq_ignore_ascii_case("none") {
             return Ok(ledger_core::PaymentMethodFilter::Unassigned);
         }
     }
     let key: ledger_core::PaymentMethodKey = a.into();
-    Ok(ledger_core::PaymentMethodFilter::Id(l.find_payment_method(&key)?.id))
+    Ok(ledger_core::PaymentMethodFilter::Id(l.find_payment_method_in(Some(&bkey(biz)), &key)?.id))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -585,6 +599,8 @@ struct CreatePaymentMethodInput {
     last4: Option<String>,
     /// Use this payment method for new expenses when none is named. Defaults to false.
     make_default: Option<bool>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -592,6 +608,8 @@ struct CreatePaymentMethodInput {
 struct ListPaymentMethodsInput {
     /// Also list retired payment methods. Defaults to false.
     include_retired: Option<bool>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -601,6 +619,8 @@ struct RenamePaymentMethodInput {
     payment_method: PaymentMethodArg,
     /// The new nickname.
     nickname: String,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -608,6 +628,8 @@ struct RenamePaymentMethodInput {
 struct RetirePaymentMethodInput {
     /// The payment method to retire: its id or its nickname.
     payment_method: PaymentMethodArg,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -617,6 +639,120 @@ struct SetDefaultPaymentMethodInput {
     payment_method: Option<PaymentMethodArg>,
     /// Set true to have no default.
     clear: Option<bool>,
+    /// The business to use: its name or id. Omit for the current business (see ledger_info).
+    business: Option<BusinessArg>,
+}
+
+/// A business as the wire carries it: its id (a number) or its name (text, any letter case).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(untagged)]
+enum BusinessArg {
+    Id(i64),
+    Name(String),
+}
+
+impl From<BusinessArg> for ledger_core::BusinessKey {
+    fn from(a: BusinessArg) -> Self {
+        match a {
+            BusinessArg::Id(n) => ledger_core::BusinessKey::Id(n),
+            BusinessArg::Name(s) => ledger_core::BusinessKey::Name(s),
+        }
+    }
+}
+
+fn business_json(b: &ledger_core::Business) -> Value {
+    serde_json::to_value(b).expect("business serializes")
+}
+
+/// Which business a call acts in: the one named, else the current one. A write refuses an archived business.
+fn scope(l: &Ledger, b: Option<BusinessArg>, write: bool) -> Result<ledger_core::Business, ToolError> {
+    match b {
+        Some(a) => {
+            let biz = l.find_business(&a.into())?;
+            if write && biz.archived {
+                return Err(LedgerError::ArchivedBusiness(biz.name).into());
+            }
+            Ok(biz)
+        }
+        None => Ok(l.current_business()?.ok_or(LedgerError::NoCurrentBusiness)?),
+    }
+}
+
+fn bkey(b: &ledger_core::Business) -> ledger_core::BusinessKey {
+    ledger_core::BusinessKey::Id(b.id)
+}
+
+/// "In Pat's Prints: ..." or "In Test shop (test business): ...".
+fn in_business(b: &ledger_core::Business, note: String) -> String {
+    format!("In {}: {note}", biz_label(&b.name, b.is_test))
+}
+
+/// A success reply for a business-scoped tool: the business it used and the prefixed note.
+fn stamped(mut v: Value, b: &ledger_core::Business, note: impl Into<String>) -> Value {
+    v["business"] = json!({ "id": b.id, "name": b.name, "is_test": b.is_test });
+    with_note(v, in_business(b, note.into()))
+}
+
+/// The business an existing entry lives in.
+fn business_of(l: &Ledger, business_id: i64) -> Result<ledger_core::Business, ToolError> {
+    Ok(l.find_business(&ledger_core::BusinessKey::Id(business_id))?)
+}
+
+fn biz_label(name: &str, is_test: bool) -> String {
+    if is_test {
+        format!("{name} (test business)")
+    } else {
+        name.to_string()
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateBusinessInput {
+    /// The business name, 1 to 60 characters, for example "Pat's Prints".
+    name: String,
+    /// An optional short note about the business, up to 200 characters.
+    note: Option<String>,
+    /// True for a business used only for trying things out; the app marks it Test.
+    is_test: Option<bool>,
+    /// True to make the new business the one new entries go to.
+    switch_to: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListBusinessesInput {
+    /// True to include archived businesses.
+    include_archived: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BusinessOnlyInput {
+    /// The business: its name or id.
+    business: BusinessArg,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RenameBusinessInput {
+    /// The business: its name or id.
+    business: BusinessArg,
+    /// The new name, 1 to 60 characters.
+    name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateBusinessInput {
+    /// The business: its name or id.
+    business: BusinessArg,
+    /// A new note, up to 200 characters.
+    note: Option<String>,
+    /// True to remove the note.
+    clear_note: Option<bool>,
+    /// True for a business used only for trying things out; the app marks it Test.
+    is_test: Option<bool>,
 }
 
 #[tool_router]
@@ -628,10 +764,38 @@ impl LedgerTools {
     fn ledger_info(&self) -> CallToolResult {
         respond(self.with_ledger(|l| {
             let info = l.info()?;
-            Ok(with_note(
-                serde_json::to_value(info).expect("info serializes"),
-                "This one file holds all the books; amounts are US dollars and nothing is ever deleted, only voided or corrected.",
-            ))
+            let active = l.businesses(false)?;
+            let current = l.current_business()?;
+            let list: Vec<Value> = active
+                .iter()
+                .map(|b| {
+                    json!({
+                        "id": b.id,
+                        "name": b.name,
+                        "is_test": b.is_test,
+                        "is_current": b.is_current,
+                        "transaction_count": b.transaction_count,
+                    })
+                })
+                .collect();
+            let n = active.len();
+            let tail = "Amounts are US dollars and nothing is ever deleted, only voided or corrected.";
+            let note = match &current {
+                Some(c) => format!(
+                    "This one file holds all the books, in {n} businesses; new entries go to {}. {tail}",
+                    c.name
+                ),
+                None => format!(
+                    "This one file holds all the books, in {n} businesses; no business is current, so call switch_business before recording. {tail}"
+                ),
+            };
+            let mut v = serde_json::to_value(info).expect("info serializes");
+            v["businesses"] = Value::Array(list);
+            v["current_business"] = match &current {
+                Some(c) => json!({ "id": c.id, "name": c.name, "is_test": c.is_test }),
+                None => Value::Null,
+            };
+            Ok(with_note(v, note))
         }))
     }
 
@@ -671,7 +835,11 @@ impl LedgerTools {
                 payment_method: i.payment_method.map(Into::into),
             };
             let named = new.payment_method.is_some();
-            let t = self.with_ledger(|l| Ok(l.record_expense(new)?))?;
+            let (biz, t) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, true)?;
+                let t = l.record_expense_in(Some(&bkey(&biz)), new)?;
+                Ok((biz, t))
+            })?;
             // The agent records with defaults instead of asking first, so every note names the
             // date and category that were actually stored, for the person to correct.
             let date = t.occurred_on;
@@ -688,7 +856,7 @@ impl LedgerTools {
                 format!("Recorded on {date} as {filed_under}: it counts toward your deductions for the year.")
             };
             let note = format!("{note}{}", method_sentence(&t, !named && t.payment_method.is_some(), false));
-            Ok(with_note(txn_json(&t), note))
+            Ok(stamped(txn_json(&t), &biz, note))
         })())
     }
     #[tool(
@@ -706,14 +874,18 @@ impl LedgerTools {
                 source: i.source,
                 payment_method: i.payment_method.map(Into::into),
             };
-            let t = self.with_ledger(|l| Ok(l.record_income(new)?))?;
+            let (biz, t) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, true)?;
+                let t = l.record_income_in(Some(&bkey(&biz)), new)?;
+                Ok((biz, t))
+            })?;
             let note = format!(
                 "Recorded as {}{}: income is reported for the year it was received, and the same source name is reused each time.{}",
                 t.category_label,
                 t.schedule_c_line.as_deref().map(|l| format!(" (Schedule C line {l})")).unwrap_or_default(),
                 method_sentence(&t, false, false)
             );
-            Ok(with_note(txn_json(&t), note))
+            Ok(stamped(txn_json(&t), &biz, note))
         })())
     }
 
@@ -736,7 +908,14 @@ impl LedgerTools {
                 .enumerate()
                 .map(|(idx, e)| batch_entry(idx + 1, e))
                 .collect::<Result<Vec<_>, _>>()?;
-            let r = self.with_ledger(|l| Ok(l.record_batch(ledger_core::NewBatch { label: i.label, entries, payment_method: i.payment_method.map(Into::into) })?))?;
+            let (biz, r) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, true)?;
+                let r = l.record_batch_in(
+                    Some(&bkey(&biz)),
+                    ledger_core::NewBatch { label: i.label, entries, payment_method: i.payment_method.map(Into::into) },
+                )?;
+                Ok((biz, r))
+            })?;
             let recorded: Vec<Value> = r
                 .recorded
                 .iter()
@@ -789,7 +968,7 @@ impl LedgerTools {
                 }
                 None => format!("Nothing new was recorded: all {sc} entries match entries already in the books (same date, kind, amount and description). If one really is a second charge, send it again with allow_duplicate set to true."),
             };
-            Ok(with_note(
+            Ok(stamped(
                 json!({
                     "batch_id": r.batch_id,
                     "label": r.label,
@@ -798,6 +977,7 @@ impl LedgerTools {
                     "recorded": recorded,
                     "skipped_duplicates": skipped,
                 }),
+                &biz,
                 note,
             ))
         })())
@@ -816,9 +996,10 @@ impl LedgerTools {
             if !(1..=500).contains(&limit) {
                 return Err(ToolError::Input("limit must be between 1 and 500.".into()));
             }
+            let biz = self.with_ledger(|l| scope(l, i.business, false))?;
             let pm_filter = i
                 .payment_method
-                .map(|a| self.with_ledger(|l| filter_arg(l, a)))
+                .map(|a| self.with_ledger(|l| filter_arg(l, &biz, a)))
                 .transpose()?;
             let filter = ledger_core::Filter {
                 from: parse_date_arg(&i.from)?,
@@ -829,7 +1010,7 @@ impl LedgerTools {
                 is_asset: i.is_asset,
                 batch_id: i.batch_id,
                 payment_method: pm_filter,
-                business_id: None,
+                business_id: Some(biz.id),
                 include_voided: i.include_voided.unwrap_or(false),
                 limit: Some(limit),
             };
@@ -843,7 +1024,7 @@ impl LedgerTools {
                 "Voided entries are hidden; set include_voided to see them with their reasons.".to_string()
             };
             let transactions: Vec<Value> = rows.iter().map(txn_json).collect();
-            Ok(with_note(json!({ "transactions": transactions, "count": count }), note))
+            Ok(stamped(json!({ "transactions": transactions, "count": count }), &biz, note))
         })())
     }
 
@@ -854,9 +1035,13 @@ impl LedgerTools {
     fn reclassify_transaction(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: ReclassifyInput = parse_args(args)?;
-            let t = self.with_ledger(|l| Ok(l.reclassify(i.id, &i.category, &i.reason)?))?;
-            Ok(with_note(
+            let (biz, t) = self.with_ledger(|l| {
+                let t = l.reclassify(i.id, &i.category, &i.reason)?;
+                Ok((business_of(l, t.business_id)?, t))
+            })?;
+            Ok(stamped(
                 txn_json(&t),
+                &biz,
                 "Reclassified, not rewritten: the original category stays in the history and the new one counts in totals.",
             ))
         })())
@@ -869,9 +1054,13 @@ impl LedgerTools {
     fn void_transaction(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: VoidInput = parse_args(args)?;
-            let t = self.with_ledger(|l| Ok(l.void(i.id, &i.reason)?))?;
-            Ok(with_note(
+            let (biz, t) = self.with_ledger(|l| {
+                let t = l.void(i.id, &i.reason)?;
+                Ok((business_of(l, t.business_id)?, t))
+            })?;
+            Ok(stamped(
                 txn_json(&t),
+                &biz,
                 "Voided, not deleted: it stays in your history and no longer counts in totals.",
             ))
         })())
@@ -884,7 +1073,15 @@ impl LedgerTools {
     fn void_batch(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: VoidBatchInput = parse_args(args)?;
-            let r = self.with_ledger(|l| Ok(l.void_batch(i.batch_id, &i.reason)?))?;
+            let (biz, r) = self.with_ledger(|l| {
+                let r = l.void_batch(i.batch_id, &i.reason)?;
+                let biz = match (r.voided.first(), r.already_voided_ids.first()) {
+                    (Some(t), _) => business_of(l, t.business_id)?,
+                    (None, Some(id)) => business_of(l, l.get(*id)?.business_id)?,
+                    (None, None) => scope(l, None, false)?,
+                };
+                Ok((biz, r))
+            })?;
             let (n, m) = (r.voided.len(), r.already_voided_ids.len());
             let note = if n > 0 {
                 let base = format!(
@@ -899,7 +1096,7 @@ impl LedgerTools {
             } else {
                 format!("Nothing left to void in batch {} (\"{}\"): all {m} entries were already voided.", r.batch_id, r.label)
             };
-            Ok(with_note(
+            Ok(stamped(
                 json!({
                     "batch_id": r.batch_id,
                     "label": r.label,
@@ -908,6 +1105,7 @@ impl LedgerTools {
                     "voided": r.voided.iter().map(txn_json).collect::<Vec<Value>>(),
                     "already_voided_ids": r.already_voided_ids,
                 }),
+                &biz,
                 note,
             ))
         })())
@@ -942,9 +1140,13 @@ impl LedgerTools {
                 payment_method: i.payment_method.map(Into::into),
             };
             let named = r.payment_method.is_some();
-            let c = self.with_ledger(|l| Ok(l.correct(i.id, &i.reason, r)?))?;
-            Ok(with_note(
+            let (biz, c) = self.with_ledger(|l| {
+                let c = l.correct(i.id, &i.reason, r)?;
+                Ok((business_of(l, c.replacement.business_id)?, c))
+            })?;
+            Ok(stamped(
                 json!({ "voided": txn_json(&c.voided), "replacement": txn_json(&c.replacement) }),
+                &biz,
                 format!(
                     "Corrected by voiding the original and recording a linked replacement, so the history shows exactly what changed and why.{}",
                     method_sentence(&c.replacement, false, !named && c.replacement.payment_method.is_some())
@@ -973,9 +1175,10 @@ impl LedgerTools {
                     ))
                 }
             };
+            let biz = self.with_ledger(|l| scope(l, i.business, false))?;
             let pm_filter = i
                 .payment_method
-                .map(|a| self.with_ledger(|l| filter_arg(l, a)))
+                .map(|a| self.with_ledger(|l| filter_arg(l, &biz, a)))
                 .transpose()?;
             let req = ledger_core::SummaryRequest {
                 from,
@@ -984,7 +1187,7 @@ impl LedgerTools {
                 source: i.source,
                 is_asset: i.is_asset,
                 payment_method: pm_filter,
-                business_id: None,
+                business_id: Some(biz.id),
             };
             let s = self.with_ledger(|l| Ok(l.summarize(&req)?))?;
             let mut v = serde_json::to_value(&s).expect("summary serializes");
@@ -1003,7 +1206,7 @@ impl LedgerTools {
                     s.uncategorized.count
                 );
             }
-            Ok(with_note(v, note))
+            Ok(stamped(v, &biz, note))
         })())
     }
 
@@ -1026,18 +1229,23 @@ impl LedgerTools {
                     Some(p)
                 }
             };
-            let r = self.with_ledger(|l| Ok(l.export_tax_year(i.year, dest.as_deref())?))?;
+            let (biz, r) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, false)?;
+                let r = l.export_tax_year_in(i.year, Some(&bkey(&biz)), dest.as_deref())?;
+                Ok((biz, r))
+            })?;
             let folder = r.folder.display().to_string();
             let note = format!(
                 "Your {} books are in {folder}. Hand the whole folder to your preparer; README.txt explains every file.",
                 i.year
             );
-            Ok(with_note(
+            Ok(stamped(
                 json!({
                     "folder": folder,
                     "files": r.files,
                     "totals": serde_json::to_value(&r.summary).expect("summary serializes"),
                 }),
+                &biz,
                 note,
             ))
         })())
@@ -1051,7 +1259,11 @@ impl LedgerTools {
         respond((|| {
             let i: AssignPaymentMethodInput = parse_args(args)?;
             let key: ledger_core::PaymentMethodKey = i.payment_method.into();
-            let r = self.with_ledger(|l| Ok(l.assign_payment_method(&key, &i.ids)?))?;
+            let (biz, r) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, true)?;
+                let r = l.assign_payment_method_in(Some(&bkey(&biz)), &key, &i.ids)?;
+                Ok((biz, r))
+            })?;
             let p = &r.payment_method;
             let d = describe_method(&p.nickname, p.kind, p.last4.as_deref());
             let (a, u) = (r.assigned.len(), r.unchanged_ids.len());
@@ -1065,7 +1277,7 @@ impl LedgerTools {
                 n.push_str(" Any earlier payment method stays in the history.");
                 n
             };
-            Ok(with_note(
+            Ok(stamped(
                 json!({
                     "payment_method": serde_json::to_value(p).expect("payment method serializes"),
                     "assigned_count": a,
@@ -1073,6 +1285,7 @@ impl LedgerTools {
                     "assigned": r.assigned.iter().map(txn_json).collect::<Vec<Value>>(),
                     "unchanged_ids": r.unchanged_ids,
                 }),
+                &biz,
                 note,
             ))
         })())
@@ -1091,10 +1304,11 @@ impl LedgerTools {
                 last4: i.last4,
                 make_default: i.make_default.unwrap_or(false),
             };
-            let (p, default) = self.with_ledger(|l| {
-                let p = l.create_payment_method(new)?;
-                let d = l.default_payment_method()?;
-                Ok((p, d))
+            let (biz, p, default) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, true)?;
+                let p = l.create_payment_method_in(Some(&bkey(&biz)), new)?;
+                let d = l.default_payment_method_in(Some(&bkey(&biz)))?;
+                Ok((biz, p, d))
             })?;
             let tail = if p.is_default {
                 " It is now the default for new expenses.".to_string()
@@ -1107,7 +1321,7 @@ impl LedgerTools {
                 "Saved {}. Only the last 4 digits are kept, never a full number.{tail}",
                 describe_method(&p.nickname, p.kind, p.last4.as_deref())
             );
-            Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+            Ok(stamped(serde_json::to_value(&p).expect("payment method serializes"), &biz, note))
         })())
     }
 
@@ -1119,7 +1333,11 @@ impl LedgerTools {
     fn list_payment_methods(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: ListPaymentMethodsInput = parse_args(args)?;
-            let list = self.with_ledger(|l| Ok(l.payment_methods(i.include_retired.unwrap_or(false))?))?;
+            let (biz, list) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, false)?;
+                let list = l.payment_methods_in(Some(&bkey(&biz)), i.include_retired.unwrap_or(false))?;
+                Ok((biz, list))
+            })?;
             let n = list.len();
             let note = if n == 0 {
                 "No payment methods yet. Create one with create_payment_method, for example a card nicknamed \"Business Visa\" with its last 4 digits.".to_string()
@@ -1130,7 +1348,7 @@ impl LedgerTools {
                 };
                 format!("{n} payment methods. {default} Only nicknames and last 4 digits are kept, never full numbers.")
             };
-            Ok(with_note(json!({ "payment_methods": list, "count": n }), note))
+            Ok(stamped(json!({ "payment_methods": list, "count": n }), &biz, note))
         })())
     }
 
@@ -1142,10 +1360,11 @@ impl LedgerTools {
         respond((|| {
             let i: RenamePaymentMethodInput = parse_args(args)?;
             let key: ledger_core::PaymentMethodKey = i.payment_method.into();
-            let (before, p) = self.with_ledger(|l| {
-                let before = l.find_payment_method(&key)?.nickname;
-                let p = l.rename_payment_method(&key, &i.nickname)?;
-                Ok((before, p))
+            let (biz, before, p) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, true)?;
+                let before = l.find_payment_method_in(Some(&bkey(&biz)), &key)?.nickname;
+                let p = l.rename_payment_method_in(Some(&bkey(&biz)), &key, &i.nickname)?;
+                Ok((biz, before, p))
             })?;
             let note = if p.nickname == before {
                 format!("{} already has that name, so nothing changed.", p.nickname)
@@ -1155,7 +1374,7 @@ impl LedgerTools {
                     p.nickname
                 )
             };
-            Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+            Ok(stamped(serde_json::to_value(&p).expect("payment method serializes"), &biz, note))
         })())
     }
 
@@ -1167,10 +1386,11 @@ impl LedgerTools {
         respond((|| {
             let i: RetirePaymentMethodInput = parse_args(args)?;
             let key: ledger_core::PaymentMethodKey = i.payment_method.into();
-            let (was_default, p) = self.with_ledger(|l| {
-                let was_default = l.find_payment_method(&key)?.is_default;
-                let p = l.retire_payment_method(&key)?;
-                Ok((was_default, p))
+            let (biz, was_default, p) = self.with_ledger(|l| {
+                let biz = scope(l, i.business, true)?;
+                let was_default = l.find_payment_method_in(Some(&bkey(&biz)), &key)?.is_default;
+                let p = l.retire_payment_method_in(Some(&bkey(&biz)), &key)?;
+                Ok((biz, was_default, p))
             })?;
             let mut note = format!(
                 "{} is retired, not deleted: its {} entries keep it, and nothing new can go on it.",
@@ -1179,7 +1399,7 @@ impl LedgerTools {
             if was_default {
                 note.push_str(" It was the default, so there is no default now.");
             }
-            Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+            Ok(stamped(serde_json::to_value(&p).expect("payment method serializes"), &biz, note))
         })())
     }
 
@@ -1194,19 +1414,26 @@ impl LedgerTools {
             match (i.payment_method, clear) {
                 (Some(pm), false) => {
                     let key: ledger_core::PaymentMethodKey = pm.into();
-                    let p = self
-                        .with_ledger(|l| Ok(l.set_default_payment_method(Some(&key))?))?
-                        .expect("a chosen default is returned");
+                    let (biz, p) = self.with_ledger(|l| {
+                        let biz = scope(l, i.business, true)?;
+                        let p = l.set_default_payment_method_in(Some(&bkey(&biz)), Some(&key))?;
+                        Ok((biz, p.expect("a chosen default is returned")))
+                    })?;
                     let note = format!(
                         "{} is now the default: new expenses use it when no payment method is named.",
                         describe_method(&p.nickname, p.kind, p.last4.as_deref())
                     );
-                    Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+                    Ok(stamped(serde_json::to_value(&p).expect("payment method serializes"), &biz, note))
                 }
                 (None, true) => {
-                    self.with_ledger(|l| Ok(l.set_default_payment_method(None)?))?;
-                    Ok(with_note(
+                    let biz = self.with_ledger(|l| {
+                        let biz = scope(l, i.business, true)?;
+                        l.set_default_payment_method_in(Some(&bkey(&biz)), None)?;
+                        Ok(biz)
+                    })?;
+                    Ok(stamped(
                         json!({ "default": null }),
+                        &biz,
                         "No default now: new expenses get no payment method unless one is named.",
                     ))
                 }
@@ -1216,10 +1443,182 @@ impl LedgerTools {
             }
         })())
     }
+
+    #[tool(
+        description = "Add a business to this ledger, for example a second shop, or a test business for trying things out so it never mixes with the real books. Each business keeps its own entries, payment methods and tax export; categories are shared. Set is_test=true for a test business: the app marks it Test. New entries keep going to the current business unless switch_to is true (a new business becomes current by itself when none is). Names are unique among businesses in use, in any letter case.",
+        input_schema = schema_for_input::<CreateBusinessInput>().expect("schema")
+    )]
+    fn create_business(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: CreateBusinessInput = parse_args(args)?;
+            let (b, current) = self.with_ledger(|l| {
+                let b = l.create_business(ledger_core::NewBusiness {
+                    name: i.name,
+                    note: i.note,
+                    is_test: i.is_test.unwrap_or(false),
+                    make_current: i.switch_to.unwrap_or(false),
+                })?;
+                let current = l.current_business()?;
+                Ok((b, current))
+            })?;
+            let t = if b.is_test { " (a test business)" } else { "" };
+            let note = if b.is_current {
+                format!(
+                    "Created {}{t} and switched to it: new entries go there until you switch again.",
+                    b.name
+                )
+            } else {
+                let cur = current.map(|c| c.name).unwrap_or_default();
+                format!(
+                    "Created {}{t}. New entries still go to {cur}; say \"switch to {}\" to record there.",
+                    b.name, b.name
+                )
+            };
+            Ok(with_note(business_json(&b), note))
+        })())
+    }
+
+    #[tool(
+        description = "List the businesses in this ledger with their ids, which one is current (where new entries go), which are test businesses, and how many entries each holds. Use it for \"which businesses do I have?\" or before switch_business.",
+        input_schema = schema_for_input::<ListBusinessesInput>().expect("schema"),
+        annotations(read_only_hint = true)
+    )]
+    fn list_businesses(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: ListBusinessesInput = parse_args(args)?;
+            let list = self.with_ledger(|l| Ok(l.businesses(i.include_archived.unwrap_or(false))?))?;
+            let n = list.len();
+            let note = match list.iter().find(|b| b.is_current) {
+                Some(c) => format!("{n} businesses. New entries go to {}.", c.name),
+                None => format!("{n} businesses. None is current: call switch_business before recording."),
+            };
+            let items: Vec<Value> = list.iter().map(business_json).collect();
+            Ok(with_note(json!({ "businesses": items, "count": n }), note))
+        })())
+    }
+
+    #[tool(
+        description = "Choose which business new entries are recorded in, for example when the person says \"switch to my test business\" or \"back to the real books\". This only changes where you record; the person's app window keeps showing whichever business they picked there. Tell the person which business you are now recording in.",
+        input_schema = schema_for_input::<BusinessOnlyInput>().expect("schema")
+    )]
+    fn switch_business(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: BusinessOnlyInput = parse_args(args)?;
+            let key: ledger_core::BusinessKey = i.business.into();
+            let b = self.with_ledger(|l| Ok(l.set_current_business(&key)?))?;
+            let note = format!("New entries now go to {}.", biz_label(&b.name, b.is_test));
+            Ok(with_note(business_json(&b), note))
+        })())
+    }
+
+    #[tool(
+        description = "Give a business a new name. Its entries, payment methods and exports follow the new name. A change of letter case alone is a rename too.",
+        input_schema = schema_for_input::<RenameBusinessInput>().expect("schema")
+    )]
+    fn rename_business(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: RenameBusinessInput = parse_args(args)?;
+            let key: ledger_core::BusinessKey = i.business.into();
+            let (old, b) = self.with_ledger(|l| {
+                let old = l.find_business(&key)?.name;
+                let b = l.rename_business(&key, &i.name)?;
+                Ok((old, b))
+            })?;
+            let note = if old == b.name {
+                format!("{} already has that name.", b.name)
+            } else {
+                format!("Renamed {old} to {}.", b.name)
+            };
+            Ok(with_note(business_json(&b), note))
+        })())
+    }
+
+    #[tool(
+        description = "Change a business's note, or mark it as a test business or a real one. Use rename_business to change its name.",
+        input_schema = schema_for_input::<UpdateBusinessInput>().expect("schema")
+    )]
+    fn update_business(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: UpdateBusinessInput = parse_args(args)?;
+            let clear = i.clear_note.unwrap_or(false);
+            if i.note.is_none() && !clear && i.is_test.is_none() {
+                return Err(ToolError::Input("Give a note, clear_note or is_test to change.".into()));
+            }
+            if i.note.is_some() && clear {
+                return Err(ToolError::Input("Give note to set one, or clear_note to remove it, not both.".into()));
+            }
+            let key: ledger_core::BusinessKey = i.business.into();
+            let mut changed: Vec<&str> = Vec::new();
+            let b = self.with_ledger(|l| {
+                let mut b = l.find_business(&key)?;
+                if let Some(n) = i.note.as_deref() {
+                    let was = b.note.clone();
+                    b = l.set_business_note(&key, Some(n))?;
+                    if b.note != was {
+                        changed.push(if b.note.is_some() { "note set" } else { "note cleared" });
+                    }
+                } else if clear {
+                    let was = b.note.clone();
+                    b = l.set_business_note(&key, None)?;
+                    if b.note != was {
+                        changed.push("note cleared");
+                    }
+                }
+                if let Some(t) = i.is_test {
+                    let was = b.is_test;
+                    b = l.set_business_test(&key, t)?;
+                    if b.is_test != was {
+                        changed.push(if t { "marked as a test business" } else { "marked as a real business" });
+                    }
+                }
+                Ok(b)
+            })?;
+            let note = if changed.is_empty() {
+                format!("{} already looked like that, so nothing changed.", b.name)
+            } else {
+                format!("Updated {}: {}.", b.name, changed.join(", "))
+            };
+            Ok(with_note(business_json(&b), note))
+        })())
+    }
+
+    #[tool(
+        description = "Archive a business that is no longer used. Nothing is deleted: its entries, payment methods and exports stay, the app can still show it, and restore_business brings it back. Nothing new can be recorded in it. If it was the current business, none is current until you switch.",
+        input_schema = schema_for_input::<BusinessOnlyInput>().expect("schema")
+    )]
+    fn archive_business(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: BusinessOnlyInput = parse_args(args)?;
+            let key: ledger_core::BusinessKey = i.business.into();
+            let (was_current, b) = self.with_ledger(|l| {
+                let was_current = l.find_business(&key)?.is_current;
+                let b = l.archive_business(&key)?;
+                Ok((was_current, b))
+            })?;
+            let mut note = format!("Archived {}; nothing was deleted.", b.name);
+            if was_current {
+                note.push_str(" No business is current now: say which one to record in.");
+            }
+            Ok(with_note(business_json(&b), note))
+        })())
+    }
+
+    #[tool(
+        description = "Bring back an archived business so entries can be recorded in it again. It does not become current; use switch_business for that.",
+        input_schema = schema_for_input::<BusinessOnlyInput>().expect("schema")
+    )]
+    fn restore_business(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: BusinessOnlyInput = parse_args(args)?;
+            let key: ledger_core::BusinessKey = i.business.into();
+            let b = self.with_ledger(|l| Ok(l.restore_business(&key)?))?;
+            Ok(with_note(business_json(&b), format!("Restored {}.", b.name)))
+        })())
+    }
 }
 
 #[tool_handler(
     name = "freehold-ledger",
-    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call. Payment methods (cards, bank accounts, cash) are kept by nickname and last 4 digits only: never ask for, repeat, or send a full card or account number, expiry date or security code."
+    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call. Payment methods (cards, bank accounts, cash) are kept by nickname and last 4 digits only: never ask for, repeat, or send a full card or account number, expiry date or security code. One ledger file can hold several businesses, for example the real books and a test business. Every recording, list, summary, payment method and export works in one business: the current one, unless you pass business. Switch with switch_business only when the person asks (\"switch to my test business\"), and always tell the person which business you recorded into. Create, rename, mark as test, archive and restore businesses by conversation; nothing is ever deleted."
 )]
 impl ServerHandler for LedgerTools {}

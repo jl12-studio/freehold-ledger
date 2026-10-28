@@ -76,9 +76,25 @@ Things to say:
 
 The app shows each entry's payment method in its own column, and you can filter by it. Entries made before you added a card show "Not set" until you assign one.
 
+## Businesses
+
+One ledger file can keep the books of more than one business, for example your real business and a test business where you or your agent can try things without touching the real books. Your existing books are in a business called "My business"; ask your agent to rename it.
+
+Your agent creates and manages businesses for you. It records into one business at a time, and every reply says which one it used. The app window has its own Business menu: it only changes what you are looking at, never where your agent records.
+
+Things to say:
+
+- "Make a test business called Test shop."
+- "Switch to my test business."
+- "Back to the real books."
+- "Rename My business to Pat's Prints."
+- "Archive the test business." (Nothing is deleted, and it can be restored.)
+
+Each business has its own entries, cards and accounts, and its own year-end export. A test business is marked Test in the app, and its export folder says test.
+
 ## What the year-end export gives your preparer
 
-Press Export in the app (or ask your agent for your books for the year). It creates a folder such as "Freehold Ledger 2026 export" (with the year you chose) in Documents/Freehold Ledger/exports. Inside:
+Press Export in the app (or ask your agent for your books for the year). It creates a folder for the business you are looking at, such as "Freehold Ledger My business 2026 export" (with the year you chose) in Documents/Freehold Ledger/exports. Inside:
 
 - `README.txt` explaining every file in plain words
 - `transactions.csv`, every entry for the year, voided ones marked, with the payment method and its last 4 digits so your preparer can match entries to statements

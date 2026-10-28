@@ -30,6 +30,7 @@ A transaction is one thing that happened to the money of your business: one expe
 | `recorded_at` | When the entry was written into the ledger, in UTC. Set by the ledger, not by you. |
 | `replaces_id` | Only on a correction: the id of the entry this one replaces. Empty otherwise. |
 | payment method | Optional: the card, bank account, cash or other method it was paid with (see Payment methods below). Empty until one is set. |
+| business | Which business the entry belongs to (see Businesses). Set when it is recorded and never changes; a correction stays in its original's business. |
 
 Assets are listed separately in the export. The app does not compute depreciation; your agent and your tax preparer supply that knowledge.
 
@@ -105,16 +106,35 @@ A payment method is a card, a bank account, cash, or something else the business
 | `default_payment_method_changes` | Each time the default is set or cleared. The latest row is the default, so there is at most one. |
 | `payment_method_assignments` | Each time an entry is put on a payment method. The latest row for an entry is its payment method; earlier rows are the history. |
 
-- Nicknames are unique among payment methods in use, in any letter case. "none" is reserved.
-- A new expense with no payment method named goes on the default, if there is one. Income never does.
+- Each payment method belongs to one business. Nicknames are unique among that business's payment methods in use, in any letter case. "none" is reserved.
+- Each business has at most one default. A new expense with no payment method named goes on its business's default, if there is one. Income never does.
 - A correction's replacement keeps the original's payment method unless a new one is given.
 - Voided entries keep their payment method and cannot be moved to another.
 - Entries recorded before payment methods existed have none until one is assigned.
 - All four tables are append-only, like the rest of the ledger.
 
+## Businesses
+
+One ledger file can hold several businesses, for example the real books and a test business. Every entry, batch and payment method belongs to exactly one business; categories and the list of income source names are shared. Your agent records into its current business unless it names another one for a single entry. The app window picks which business it shows on its own and never changes where the agent records.
+
+| Table | In plain words |
+|---|---|
+| `businesses` | One row per business: its first name, an optional note, whether it is a test business, and when it was added. |
+| `business_changes` | Renames, note changes, test-flag changes, archives and restores. The latest of each kind wins. A business is never deleted. |
+| `current_business_changes` | Each time the agent's current business is set or cleared. The latest row is the current one. |
+| `transaction_businesses` | Which business each entry belongs to. |
+| `batch_businesses` | Which business each import batch belongs to. |
+| `payment_method_businesses` | Which business each payment method belongs to. |
+| `business_default_payment_method_changes` | Each time a business's default payment method is set or cleared. The latest row per business is its default. |
+
+- Business names are unique among businesses in use, in any letter case, and never hold a full card or account number.
+- An archived business keeps everything and can still be viewed and exported; nothing new can be recorded in it until it is restored.
+- When a schema 3 file is upgraded, every existing entry, batch and payment method moves into one business named "My business", which becomes current. The older `default_payment_method_changes` table is kept as history.
+- All seven tables are append-only, like the rest of the ledger.
+
 ## 6. Versions
 
-The file is now schema 3; files from schema 1 or 2 upgrade automatically when opened. A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
+The file is now schema 4; files from schema 1, 2 or 3 upgrade automatically when opened. A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
 
 ## 7. What must never be lost
 
@@ -126,10 +146,13 @@ The file is now schema 3; files from schema 1 or 2 upgrade automatically when op
 - Every payment method, rename and retirement
 - Every change of default payment method
 - Every payment method assignment
+- Every business, rename, note, test flag, archive and restore
+- Every change of current business
+- Which business each entry, batch and payment method belongs to
 
 ## 8. What the export will contain (coming in M4)
 
-Exporting a tax year writes a new folder named `Freehold Ledger <year> export/`, by default under `Documents/Freehold Ledger/exports/`. If that folder already exists, a ` (2)`, ` (3)` suffix is added; nothing is overwritten. Inside:
+Exporting a tax year writes one business's books to a new folder named `Freehold Ledger <business> <year> export/` (or Freehold Ledger <business> (test) <year> export/ for a test business), by default under `Documents/Freehold Ledger/exports/`. If that folder already exists, a ` (2)`, ` (3)` suffix is added; nothing is overwritten. Inside:
 
 - `transactions.csv`: every transaction for the year, with a header row, including each entry's payment method nickname and last 4 digits.
 - `expenses-by-category.csv`: expense totals per category, with the Schedule C line.
