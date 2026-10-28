@@ -156,6 +156,7 @@ export interface ConnectionInfo {
   claude_desktop_json: string;
   claude_code_command: string;
   generic: string;
+  agent_message: string;
 }
 
 export function getConnectionInfo(): Promise<ConnectionInfo> {

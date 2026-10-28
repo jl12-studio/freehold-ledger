@@ -32,7 +32,7 @@ Stage 1 (local desktop, Mac first). Not released yet.
 
 ## Two guides
 
-Freehold apps carry two guides: one for the person ([`docs/HUMAN-GUIDE.md`](docs/HUMAN-GUIDE.md)) and one for their agent ([`docs/AGENT-GUIDE.md`](docs/AGENT-GUIDE.md)). The app's Connect your agent panel shows the exact settings to paste.
+Freehold apps carry two guides: one for the person ([`docs/HUMAN-GUIDE.md`](docs/HUMAN-GUIDE.md)) and one for their agent ([`docs/AGENT-GUIDE.md`](docs/AGENT-GUIDE.md)). The app's Connect your agent panel gives you one message to paste to your agent so it sets itself up.
 
 ## Build from source
 

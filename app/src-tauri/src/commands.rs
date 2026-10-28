@@ -212,6 +212,8 @@ pub struct ConnectionInfo {
     pub claude_desktop_json: String,
     pub claude_code_command: String,
     pub generic: String,
+    /// One plain-text message a person pastes to any agent so it can set itself up.
+    pub agent_message: String,
 }
 
 /// Double-quote for a POSIX shell: the paths here may hold spaces, `$`, backticks or quotes.
@@ -253,6 +255,26 @@ fn build_connection_info(server: &Path, ledger: &Path, overridden: bool) -> Conn
     let generic = format!(
         "Any MCP client that can launch a stdio server: command {server_path}, no arguments."
     );
+    let env_line = if overridden {
+        format!("\n- environment: FREEHOLD_LEDGER_DB={ledger_path}")
+    } else {
+        String::new()
+    };
+    let agent_message = format!(
+        "Please connect yourself to Freehold Ledger, my bookkeeping app, so you can keep my books for me.\n\
+\n\
+Freehold Ledger has a built-in MCP server that runs on this computer over stdio (it opens no network ports). Add it to your own MCP settings:\n\
+- name: freehold-ledger\n\
+- command: {server_path}{env_line}\n\
+\n\
+If you are Claude Code, run this command:\n\
+{claude_code_command}\n\
+\n\
+If your app keeps MCP servers in a JSON file with an \"mcpServers\" section (Claude Desktop, Cursor, and others), merge this into it:\n\
+{claude_desktop_json}\n\
+\n\
+If you can't change your own settings, walk me through doing it one step at a time. Once it's added (restart or reload if your app needs that), call the ledger_info tool to confirm you can see my ledger and tell me in one line that it worked. Then read the server's instructions and tool descriptions before recording anything. Never ask me for a full card or account number; the ledger keeps only the last 4 digits."
+    );
     ConnectionInfo {
         server_path,
         bundled,
@@ -261,6 +283,7 @@ fn build_connection_info(server: &Path, ledger: &Path, overridden: bool) -> Conn
         claude_desktop_json,
         claude_code_command,
         generic,
+        agent_message,
     }
 }
 
@@ -355,5 +378,49 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&info.claude_desktop_json).unwrap();
         assert_eq!(v["mcpServers"]["freehold-ledger"]["env"]["FREEHOLD_LEDGER_DB"], "/tmp/a b/l.sqlite3");
         assert_eq!(v["mcpServers"]["freehold-ledger"]["command"], "/repo/target/debug/ledger-mcp");
+    }
+
+    #[test]
+    fn agent_message_has_server_command_and_json_and_no_env_by_default() {
+        let info = build_connection_info(
+            Path::new("/Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp"),
+            Path::new("/Users/pat/Ledger/l.sqlite3"),
+            false,
+        );
+        let m = &info.agent_message;
+        assert!(m.starts_with("Please connect yourself to Freehold Ledger"));
+        assert!(m.contains("- command: /Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp\n"));
+        assert!(m.contains(&info.claude_code_command));
+        assert!(m.contains(&info.claude_desktop_json));
+        assert!(m.contains("\"mcpServers\""));
+        assert!(m.contains("ledger_info"));
+        assert!(!m.contains("FREEHOLD_LEDGER_DB"));
+        assert!(!m.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn agent_message_quotes_spaces_in_the_command_line() {
+        let info = build_connection_info(
+            Path::new("/Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp"),
+            Path::new("/x/l.sqlite3"),
+            false,
+        );
+        assert!(info.agent_message.contains(
+            "claude mcp add freehold-ledger -- \"/Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp\""
+        ));
+    }
+
+    #[test]
+    fn agent_message_includes_the_env_only_when_overridden() {
+        let info = build_connection_info(
+            Path::new("/repo/target/debug/ledger-mcp"),
+            Path::new("/tmp/a b/l.sqlite3"),
+            true,
+        );
+        let m = &info.agent_message;
+        assert!(m.contains("- environment: FREEHOLD_LEDGER_DB=/tmp/a b/l.sqlite3\n"));
+        assert!(m.contains("-e FREEHOLD_LEDGER_DB=\"/tmp/a b/l.sqlite3\" --"));
+        assert!(m.contains("\"FREEHOLD_LEDGER_DB\": \"/tmp/a b/l.sqlite3\""));
+        assert!(!m.contains('\u{2014}'));
     }
 }

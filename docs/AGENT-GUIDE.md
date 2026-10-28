@@ -40,7 +40,7 @@ You are connected to Freehold Ledger, a local bookkeeping file for one person's 
 
 ## Connection
 
-Freehold Ledger ships a stdio server called `ledger-mcp`. Inside the installed app it lives at `Freehold Ledger.app/Contents/MacOS/ledger-mcp`. The app's "Connect your agent" panel shows the exact path on this computer and copies each snippet below.
+Freehold Ledger ships a stdio server called `ledger-mcp`. Inside the installed app it lives at `Freehold Ledger.app/Contents/MacOS/ledger-mcp`. The app's "Connect your agent" panel shows the exact path on this computer and copies one message that tells an agent how to set itself up. The snippets below are what that message contains.
 
 Claude Desktop (Settings, Developer, Edit Config; paste into `claude_desktop_config.json`, then restart Claude):
 
@@ -63,6 +63,16 @@ claude mcp add freehold-ledger -- "<path to ledger-mcp>"
 Other agents: any MCP client that can launch a stdio server. Command `<path to ledger-mcp>`, no arguments.
 
 To use a ledger file other than the default, set `FREEHOLD_LEDGER_DB` to its full path. In Claude Desktop add `"env": {"FREEHOLD_LEDGER_DB": "<path>"}` beside `command`. In Claude Code add `-e FREEHOLD_LEDGER_DB="<path>"` before `--`.
+
+## If someone sent you the connect message
+
+A message starting "Please connect yourself to Freehold Ledger" comes from the app's Connect your agent panel. Do this:
+
+1. Add the `ledger-mcp` server to your own MCP settings with the name `freehold-ledger` and the command path in the message. If the message lists `FREEHOLD_LEDGER_DB`, set it as an environment variable. Use the command or JSON snippet that fits your app.
+2. If you cannot change your own settings, walk the person through it one step at a time.
+3. Restart or reload if your app needs it, then call `ledger_info`. Tell the person in one line that it worked.
+4. Read the server instructions and the tool list in this guide before recording anything.
+5. Never ask for a full card or account number. The ledger keeps only the last 4 digits.
 
 ## Troubleshooting
 

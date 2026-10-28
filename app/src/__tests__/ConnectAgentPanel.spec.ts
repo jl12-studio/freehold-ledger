@@ -20,7 +20,12 @@ function info(over: Record<string, unknown> = {}) {
   const server = (over.server_path as string) ?? BUNDLED;
   const overridden = Boolean(over.ledger_path_overridden);
   const env = overridden ? `,\n      "env": {\n        "FREEHOLD_LEDGER_DB": "${LEDGER}"\n      }` : "";
+  const claude_code_command = `claude mcp add freehold-ledger ${overridden ? `-e FREEHOLD_LEDGER_DB="${LEDGER}" ` : ""}-- "${server}"`;
+  const claude_desktop_json = `{\n  "mcpServers": {\n    "freehold-ledger": {\n      "command": "${server}"${env}\n    }\n  }\n}`;
+  const envLine = overridden ? `\n- environment: FREEHOLD_LEDGER_DB=${LEDGER}` : "";
+  const agent_message = `Please connect yourself to Freehold Ledger, my bookkeeping app, so you can keep my books for me.\n\n- command: ${server}${envLine}\n\nIf you are Claude Code, run this command:\n${claude_code_command}\n\nmerge this into it:\n${claude_desktop_json}\n\ncall the ledger_info tool`;
   return {
+    agent_message,
     server_path: server,
     bundled: server.includes(".app/Contents/MacOS"),
     ledger_path: LEDGER,
@@ -58,17 +63,19 @@ describe("Connect your agent panel", () => {
     document.body.innerHTML = "";
   });
 
-  it("s_con_1_shows_bundled_path_and_three_snippets", async () => {
+  it("s_con_1_shows_one_message_and_no_per_client_sections", async () => {
     const wrapper = await openPanel();
     const dialog = wrapper.get("dialog");
     expect(dialog.text()).toContain("Connect your agent");
-    for (const h of ["Claude Desktop", "Claude Code", "Other agents"]) expect(dialog.text()).toContain(h);
-    const blocks = dialog.findAll("pre").map((p) => p.text());
-    expect(blocks).toHaveLength(3);
-    for (const b of blocks) expect(b).toContain(BUNDLED);
-    expect(blocks[1]).toBe(`claude mcp add freehold-ledger -- "${BUNDLED}"`);
+    expect(dialog.text()).toContain("Copy this message and send it to your AI agent. It will set itself up.");
+    for (const h of ["Claude Desktop", "Other agents"]) expect(dialog.text()).not.toContain(h);
+    expect(dialog.findAll("h3")).toHaveLength(0);
+    const blocks = dialog.findAll("pre");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text()).toBe(info().agent_message);
+    expect(blocks[0].text()).toContain(BUNDLED);
+    expect(dialog.findAll("button").filter((b) => b.text() === "Copy")).toHaveLength(1);
     expect(dialog.text()).not.toContain("development build");
-    expect(dialog.text()).toContain("What's in my ledger?");
     wrapper.unmount();
   });
 
@@ -78,38 +85,49 @@ describe("Connect your agent panel", () => {
     expect(dialog.text()).toContain(
       "You're running a development build. This path changes once the app is installed in Applications.",
     );
-    expect(dialog.findAll("pre")[0].text()).toContain(DEV);
+    expect(dialog.get("pre").text()).toContain(DEV);
     wrapper.unmount();
   });
 
-  it("override_adds_env_to_both_snippets", async () => {
+  it("override_shows_env_in_the_message_only_when_overridden", async () => {
     const wrapper = await openPanel(info({ ledger_path_overridden: true }));
-    const blocks = wrapper.get("dialog").findAll("pre").map((p) => p.text());
-    expect(blocks[0]).toContain(`"FREEHOLD_LEDGER_DB": "${LEDGER}"`);
-    expect(blocks[1]).toContain(`-e FREEHOLD_LEDGER_DB="${LEDGER}" --`);
+    const msg = wrapper.get("dialog").get("pre").text();
+    expect(msg).toContain(`FREEHOLD_LEDGER_DB=${LEDGER}`);
+    expect(msg).toContain(`-e FREEHOLD_LEDGER_DB="${LEDGER}" --`);
     wrapper.unmount();
 
     const plain = await openPanel();
-    const p = plain.get("dialog").findAll("pre").map((x) => x.text());
-    expect(p[0]).not.toContain("FREEHOLD_LEDGER_DB");
-    expect(p[1]).not.toContain("FREEHOLD_LEDGER_DB");
+    expect(plain.get("dialog").get("pre").text()).not.toContain("FREEHOLD_LEDGER_DB");
     plain.unmount();
   });
 
-  it("copy_shows_copied_and_announces", async () => {
+  it("copy_writes_the_message_shows_copied_and_announces", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const wrapper = await openPanel();
     const dialog = wrapper.get("dialog");
-    const copy = dialog.findAll("button").filter((b) => b.text() === "Copy")[1];
+    const copy = dialog.findAll("button").find((b) => b.text() === "Copy")!;
     await copy.trigger("click");
     await flushPromises();
-    expect(writeText).toHaveBeenCalledWith(`claude mcp add freehold-ledger -- "${BUNDLED}"`);
+    expect(writeText).toHaveBeenCalledWith(info().agent_message);
     expect(dialog.findAll("button").some((b) => b.text() === "Copied")).toBe(true);
     expect(dialog.get('[aria-live="polite"]').text()).toContain("Copied");
     vi.advanceTimersByTime(2100);
     await flushPromises();
     expect(dialog.findAll("button").some((b) => b.text() === "Copied")).toBe(false);
     vi.useRealTimers();
+    wrapper.unmount();
+  });
+
+  it("copy_failure_says_so_and_does_not_show_copied", async () => {
+    writeText.mockRejectedValue(new Error("denied"));
+    const wrapper = await openPanel();
+    const dialog = wrapper.get("dialog");
+    await dialog.findAll("button").find((b) => b.text() === "Copy")!.trigger("click");
+    await flushPromises();
+    expect(dialog.get('[aria-live="polite"]').text()).toBe(
+      "Could not copy. Select the text and copy it by hand.",
+    );
+    expect(dialog.findAll("button").some((b) => b.text() === "Copied")).toBe(false);
     wrapper.unmount();
   });
 
@@ -127,7 +145,7 @@ describe("Connect your agent panel", () => {
     await primary.trigger("click");
     await flushPromises();
     expect(invoke).toHaveBeenCalledWith("mcp_connection_info");
-    expect(wrapper.get("dialog").text()).toContain("Claude Desktop");
+    expect(wrapper.get("dialog").text()).toContain("Copy this message and send it to your AI agent");
     wrapper.unmount();
   });
 });

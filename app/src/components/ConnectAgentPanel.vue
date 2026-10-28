@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { getConnectionInfo } from "../lib/api";
 import type { ConnectionInfo } from "../lib/api";
@@ -7,38 +7,10 @@ import type { ConnectionInfo } from "../lib/api";
 const dialog = ref<HTMLDialogElement | null>(null);
 const info = ref<ConnectionInfo | null>(null);
 const loadError = ref<string | null>(null);
-const copied = ref<string | null>(null);
+const copied = ref(false);
 const announcement = ref("");
 let opener: HTMLElement | null = null;
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
-
-const sections = computed(() =>
-  info.value
-    ? [
-        {
-          key: "desktop",
-          title: "Claude Desktop",
-          steps: [
-            "In Claude Desktop, open Settings, then Developer, then Edit Config.",
-            "Paste this into claude_desktop_config.json (merge it with what is there), save, and restart Claude.",
-          ],
-          code: info.value.claude_desktop_json,
-        },
-        {
-          key: "code",
-          title: "Claude Code",
-          steps: ["Run this command in Terminal."],
-          code: info.value.claude_code_command,
-        },
-        {
-          key: "other",
-          title: "Other agents",
-          steps: ["Use this in any agent that supports MCP."],
-          code: info.value.generic,
-        },
-      ]
-    : [],
-);
 
 async function open() {
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -69,18 +41,18 @@ function onClosed() {
   opener = null;
 }
 
-async function copy(key: string, text: string, title: string) {
+async function copy(text: string) {
   clearTimeout(copiedTimer);
   try {
     await writeText(text);
-    copied.value = key;
-    announcement.value = `Copied the ${title} text`;
+    copied.value = true;
+    announcement.value = "Copied the message";
     copiedTimer = setTimeout(() => {
-      copied.value = null;
+      copied.value = false;
       announcement.value = "";
     }, 2000);
   } catch {
-    copied.value = null;
+    copied.value = false;
     announcement.value = "Could not copy. Select the text and copy it by hand.";
   }
 }
@@ -98,38 +70,28 @@ defineExpose({ open });
   >
     <h2 id="connect-title" class="font-serif text-h2 font-semibold">Connect your agent</h2>
     <p class="mt-3 font-serif text-body">
-      Your agent keeps the books by talking to Freehold Ledger over MCP. Nothing goes over the
-      network: your agent starts the ledger's server on this computer, and it reads and writes only
-      your ledger file.
+      Copy this message and send it to your AI agent. It will set itself up.
     </p>
 
     <p v-if="loadError" role="alert" class="mt-6 text-ui">{{ loadError }}</p>
     <p v-else-if="!info" class="mt-6 text-ui text-muted">Looking up the settings…</p>
 
-    <section v-for="s in sections" :key="s.key" class="mt-6 border-t border-rule pt-4">
-      <h3 class="font-sans text-h4 font-semibold">{{ s.title }}</h3>
-      <p v-for="step in s.steps" :key="step" class="mt-1 text-ui">{{ step }}</p>
+    <template v-if="info">
       <pre
-        class="mt-3 overflow-x-auto rounded-sm bg-surface p-3 font-mono text-caption"
+        class="mt-4 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-surface p-3 font-mono text-caption select-text"
         tabindex="0"
-        :aria-label="`${s.title} settings`"
-      >{{ s.code }}</pre>
+        aria-label="Message for your agent"
+      >{{ info.agent_message }}</pre>
       <button
         type="button"
         class="mt-2 min-h-8 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
-        @click="copy(s.key, s.code, s.title)"
+        @click="copy(info.agent_message)"
       >
-        {{ copied === s.key ? "Copied" : "Copy" }}
+        {{ copied ? "Copied" : "Copy" }}
       </button>
-    </section>
-
-    <template v-if="info">
       <p v-if="!info.bundled" class="mt-6 text-caption text-muted">
         You're running a development build. This path changes once the app is installed in
         Applications.
-      </p>
-      <p class="mt-3 text-caption text-muted">
-        Then ask your agent: 'What's in my ledger?' It should answer from your file.
       </p>
     </template>
 
