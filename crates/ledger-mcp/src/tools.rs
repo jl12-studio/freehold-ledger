@@ -393,7 +393,7 @@ impl LedgerTools {
     }
 
     #[tool(
-        description = "Record money the business spent: a purchase, bill, or fee. Use for 'I bought...', 'I paid...'. Set is_asset for equipment or property kept longer than a year (a laptop, a camera, a tool).",
+        description = "Record money the business spent: a purchase, bill, or fee. Use for 'I bought...', 'I paid...'. Record it right away with sensible defaults (today's date, the most likely category) and tell the person your choices afterward; do not ask first. A device, computer, camera or tool the business will keep longer than a year is equipment: set is_asset=true with category depreciation_section_179, and mention that supplies is the alternative their preparer may prefer for small items. Use uncategorized only when the person says to decide later.",
         input_schema = schema_for_input::<RecordExpenseInput>().expect("schema")
     )]
     fn record_expense(&self, args: JsonObject) -> CallToolResult {
@@ -633,6 +633,6 @@ impl LedgerTools {
 
 #[tool_handler(
     name = "freehold-ledger",
-    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Call list_categories when unsure of a category."
+    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category."
 )]
 impl ServerHandler for LedgerTools {}
