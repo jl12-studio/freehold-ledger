@@ -88,7 +88,7 @@ defineExpose({ open });
       >{{ info.agent_message }}</pre>
       <button
         type="button"
-        class="mt-2 min-h-8 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
+        class="btn btn-primary mt-2"
         @click="copy(info.agent_message)"
       >
         {{ copied ? "Copied" : "Copy" }}
@@ -104,7 +104,7 @@ defineExpose({ open });
     <div class="mt-6 flex justify-end">
       <button
         type="button"
-        class="min-h-8 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
+        class="btn"
         @click="close"
       >
         Close

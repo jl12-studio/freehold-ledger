@@ -1,52 +1,46 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import BrandMark from "./BrandMark.vue";
 import BusinessSwitcher from "./BusinessSwitcher.vue";
 import ExportControl from "./ExportControl.vue";
 import type { Business } from "../lib/api";
 
 const props = defineProps<{
-  path: string | null;
   showExport?: boolean;
   businesses: Business[];
   selectedId: number | null;
   currentId: number | null;
 }>();
-defineEmits<{ reveal: []; connect: []; select: [id: number] }>();
+defineEmits<{ connect: []; select: [id: number] }>();
 
 const selected = computed(() => props.businesses.find((b) => b.id === props.selectedId) ?? null);
 </script>
 
 <template>
-  <header class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-rule px-6 py-4">
-    <h1 class="font-serif text-h3 font-semibold">Freehold Ledger</h1>
-    <div class="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+  <header class="sticky top-0 z-20 border-b border-rule bg-bg">
+    <div
+      class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 px-6 py-3 lg:grid-cols-[auto_minmax(0,1fr)_auto_auto]"
+    >
+      <div class="col-start-1 row-start-1 flex items-center gap-2.5">
+        <BrandMark class="size-[1.375rem] shrink-0" />
+        <h1 class="font-serif text-[1.375rem] leading-none font-[620] tracking-[-0.012em]">Freehold Ledger</h1>
+      </div>
       <BusinessSwitcher
         v-if="selected"
+        class="col-start-1 row-start-2 lg:col-start-2 lg:row-start-1"
         :businesses="businesses"
         :model-value="selected.id"
         :current-id="currentId"
         @update:model-value="$emit('select', $event)"
       />
+      <ExportControl v-if="showExport && selected" :business-id="selected.id" :business-name="selected.name" />
       <button
         type="button"
-        class="min-h-8 shrink-0 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
+        class="btn btn-primary col-start-2 row-start-1 lg:col-start-4"
         @click="$emit('connect')"
       >
         Connect your agent
       </button>
-      <div v-if="path" class="flex min-w-0 items-center gap-4">
-        <span class="truncate max-w-[28rem] font-mono text-caption text-muted" :title="path">{{
-          path
-        }}</span>
-        <button
-          type="button"
-          class="min-h-8 shrink-0 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
-          @click="$emit('reveal')"
-        >
-          Show in Finder
-        </button>
-      </div>
-      <ExportControl v-if="showExport && selected" :business-id="selected.id" :business-name="selected.name" />
     </div>
   </header>
 </template>

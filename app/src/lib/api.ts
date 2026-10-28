@@ -160,7 +160,12 @@ export function formatCents(cents: number): string {
   return usd.format(cents / 100);
 }
 
-const dateFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+/** "+$1,200.00" for income, "$300.00" for an expense. */
+export function formatAmount(t: Transaction): string {
+  return (t.kind === "income" ? "+" : "") + formatCents(t.amount_cents);
+}
+
+const dateFmt =new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 /** "2026-10-20" -> "Oct 20, 2026", independent of the viewer's time zone. */
 export function formatDate(iso: string): string {

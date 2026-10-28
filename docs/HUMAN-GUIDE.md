@@ -8,7 +8,7 @@ Your ledger is one file on your computer. By default it is here:
 
 `~/Library/Application Support/org.freeholders.ledger/ledger.sqlite3`
 
-The app shows the exact location at the top of its window, with a Show in Finder button. Nothing is sent anywhere. Any SQLite tool can open the file, with or without this app.
+The app shows the exact location at the bottom of its window, with a Show in Finder button. Nothing is sent anywhere. Any SQLite tool can open the file, with or without this app.
 
 ## How to back it up
 

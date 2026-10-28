@@ -18,27 +18,33 @@ const changes = computed(() => {
     return line;
   });
 });
+
+type Item =
+  | { kind: "text"; key: string; text: string }
+  | { kind: "goto"; key: string; text: string; id: number };
+
+const items = computed<Item[]>(() => {
+  const out: Item[] = [];
+  if (props.tx.void) {
+    out.push({ kind: "text", key: "void", text: `Voided ${formatDate(props.tx.void.recorded_at)}: ${props.tx.void.reason}` });
+  }
+  if (props.tx.replaced_by_id !== null) {
+    out.push({ kind: "goto", key: "by", text: `Corrected by #${props.tx.replaced_by_id}`, id: props.tx.replaced_by_id });
+  }
+  if (props.tx.replaces_id !== null) {
+    out.push({ kind: "goto", key: "corrects", text: `Corrects #${props.tx.replaces_id}`, id: props.tx.replaces_id });
+  }
+  changes.value.forEach((text, i) => out.push({ kind: "text", key: `c${i}`, text }));
+  return out;
+});
 </script>
 
 <template>
-  <div class="flex flex-col gap-1 border-l border-rule pl-4 text-caption text-muted">
-    <p v-if="tx.void">
-      Voided {{ formatDate(tx.void.recorded_at) }}: {{ tx.void.reason }}
-    </p>
-    <p v-if="tx.replaced_by_id !== null">
-      <button
-        type="button"
-        class="cursor-pointer underline decoration-accent underline-offset-4 hover:text-fg"
-        @click="emit('goto', tx.replaced_by_id)"
-      >Corrected by entry #{{ tx.replaced_by_id }}</button>
-    </p>
-    <p v-if="tx.replaces_id !== null">
-      <button
-        type="button"
-        class="cursor-pointer underline decoration-accent underline-offset-4 hover:text-fg"
-        @click="emit('goto', tx.replaces_id)"
-      >Corrects entry #{{ tx.replaces_id }}</button>
-    </p>
-    <p v-for="(line, i) in changes" :key="i">{{ line }}</p>
-  </div>
+  <p class="flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-muted">
+    <template v-for="(item, i) in items" :key="item.key">
+      <span v-if="i > 0" aria-hidden="true">·</span>
+      <button v-if="item.kind === 'goto'" type="button" class="link text-caption" @click="emit('goto', item.id)">{{ item.text }}</button>
+      <span v-else>{{ item.text }}</span>
+    </template>
+  </p>
 </template>

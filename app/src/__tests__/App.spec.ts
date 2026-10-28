@@ -119,7 +119,7 @@ describe("Freehold Ledger window", () => {
     await settle();
     expect(wrapper.find("#tx-7").exists()).toBe(false);
 
-    const link = wrapper.findAll("button").find((b) => b.text() === "Corrects entry #7")!;
+    const link = wrapper.findAll("button").find((b) => b.text() === "Corrects #7")!;
     await link.trigger("click");
     await settle();
 

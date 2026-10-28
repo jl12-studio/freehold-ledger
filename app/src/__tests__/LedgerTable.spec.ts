@@ -27,70 +27,86 @@ describe("Ledger table", () => {
     document.body.innerHTML = "";
   });
 
-  it("s_ui_3_rows_render_with_tabular_amounts", async () => {
+  it("s_ui_18_five_columns_single_line_rows", async () => {
     const wrapper = await launch();
-
-    const table = wrapper.get("table");
-    expect(table.get("caption").text()).toBe("Ledger entries");
+    await wrapper.get("input[type='checkbox']").setValue(true);
+    await flushPromises();
+    expect(wrapper.get("table caption").text()).toBe("Ledger entries");
+    expect(wrapper.findAll("th[scope='col']").map((h) => h.text())).toEqual([
+      "Date", "Description", "Category", "Paid with", "Amount",
+    ]);
     const rows = wrapper.findAll("tbody tr[id^='tx-']");
     expect(rows).toHaveLength(10);
-    // newest first
     expect(rows[0].text()).toContain("Laptop for client work");
     expect(rows[9].text()).toContain("Booth rent, winter market");
-
-    const first = rows[0];
-    expect(first.text()).toContain("Oct 20, 2026");
-    expect(first.text()).toContain("Asset");
-    expect(first.text()).toContain("Supplies");
-    expect(first.text()).toContain("Sch. C line 22");
-    expect(first.text()).toContain("Expense");
-    const amount = first.findAll("td").slice(-1)[0];
-    expect(amount.text()).toBe("$300.00");
-    expect(amount.classes()).toEqual(expect.arrayContaining(["text-right", "tabular-nums"]));
-    expect(rowFor(wrapper, 2).text()).toContain("$1,200.00");
-    expect(rowFor(wrapper, 2).text()).toContain("Upwork");
-    expect(rowFor(wrapper, 2).text()).toContain("Income");
-    expect(wrapper.findAll("th[scope='col']").map((h) => h.text())).toEqual([
-      "Date", "Description", "Category", "Payment method", "Source", "Kind", "Amount",
-    ]);
+    for (const r of rows) expect(r.findAll("td")).toHaveLength(5);
+    expect(wrapper.get("table").classes()).toEqual(expect.arrayContaining(["table-fixed", "min-w-[42rem]"]));
   });
 
-  it("s_ui_5_payment_method_column", async () => {
+  it("s_ui_19_cells_expense_row", async () => {
     const wrapper = await launch();
-    const cell = (id: number) => rowFor(wrapper, id).findAll("td")[3];
-    expect(cell(1).text()).toContain("Business Visa");
-    expect(cell(1).text()).toContain("Card ending 4242");
-    expect(cell(2).text()).toContain("Checking");
-    expect(cell(2).text()).toContain("Bank account ending 6789");
-    expect(cell(4).text()).toBe("Cash Cash");
-    expect(cell(9).text()).toContain("Old Amex");
-    expect(cell(9).text()).toContain("Card ending 0005 (retired)");
-    const none = cell(5).get("span");
+    const cells = rowFor(wrapper, 1).findAll("td");
+    expect(cells[0].text()).toBe("Oct 20, 2026");
+    expect(cells[1].text()).toContain("Laptop for client work");
+    expect(cells[1].get(".chip").text()).toBe("Asset");
+    expect(cells[2].text()).toContain("Supplies");
+    expect(cells[2].text()).toContain("line 22");
+    expect(cells[3].text()).toContain("Business Visa");
+    expect(cells[3].get(".sr-only").text()).toContain("ending");
+    expect(cells[3].get("[aria-hidden='true']").text()).toBe("\u00b7\u00b7");
+    expect(cells[3].text()).toContain("\u00b7\u00b74242");
+    expect(cells[4].text()).toBe("Expense$300.00");
+    expect(cells[4].get(".sr-only").text()).toBe("Expense");
+    expect(cells[4].classes()).toEqual(expect.arrayContaining(["text-right", "tabular-nums"]));
+  });
+
+  it("s_ui_19_cells_income_row", async () => {
+    const wrapper = await launch();
+    const cells = rowFor(wrapper, 2).findAll("td");
+    expect(cells[1].text()).toContain("Website build");
+    expect(cells[1].text()).toContain("from Upwork");
+    expect(cells[4].text()).toBe("Income+$1,200.00");
+    expect(cells[4].get(".sr-only").text()).toBe("Income");
+    expect(cells[4].classes()).toContain("text-income");
+  });
+
+  it("s_ui_19_paid_with_retired_and_not_set", async () => {
+    const wrapper = await launch();
+    const old = rowFor(wrapper, 9).findAll("td")[3];
+    expect(old.text()).toContain("Old Amex");
+    expect(old.get(".chip").text()).toBe("Retired");
+    const none = rowFor(wrapper, 5).findAll("td")[3];
     expect(none.text()).toBe("Not set");
-    expect(none.classes()).toContain("text-muted");
-    for (const id of [1, 2, 4, 5, 9]) expect(cell(id).text()).not.toContain("\u2014");
-    expect(rowFor(wrapper, 1).findAll("td").slice(-1)[0].text()).toBe("$300.00");
+    expect(none.get("span").classes()).toContain("text-muted");
+    for (const id of [1, 2, 4, 5, 9]) expect(rowFor(wrapper, id).text()).not.toContain("\u2014");
   });
 
-  it("s_ui_3_voided_row_struck_with_reason", async () => {
+  it("s_ui_20_voided_row_and_trail", async () => {
     const wrapper = await launch();
+    await wrapper.get("input[type='checkbox']").setValue(true);
+    await flushPromises();
     const voided = rowFor(wrapper, 6);
-    expect(voided.get(".line-through").text()).toContain("Domain renewal");
-    expect(voided.findAll("td").slice(-1)[0].classes()).toContain("line-through");
-    const trail = wrapper.get(`#trail-6`);
-    expect(trail.text()).toContain("Voided");
-    expect(trail.text()).toContain("Duplicate entry");
+    const cells = voided.findAll("td");
+    expect(cells[1].text()).toContain("Voided");
+    expect(cells[1].get(".line-through").text()).toContain("Domain renewal");
+    expect(cells[4].classes()).toContain("line-through");
+    expect(cells[4].classes()).not.toContain("text-income");
+    const trail = wrapper.get("#trail-6");
+    expect(trail.text()).toMatch(/^Voided [A-Z][a-z]{2} \d{1,2}, \d{4}: Duplicate entry$/);
     expect(voided.attributes("aria-describedby")).toBe("trail-6");
-    // the live twin is untouched
     expect(rowFor(wrapper, 5).find(".line-through").exists()).toBe(false);
+    expect(wrapper.find("#trail-5").exists()).toBe(false);
   });
 
-  it("s_ui_3_corrected_row_links_both_ways", async () => {
+  it("s_ui_20_corrected_row_links_both_ways", async () => {
     const wrapper = await launch();
+    await wrapper.get("input[type='checkbox']").setValue(true);
+    await flushPromises();
     const toReplacement = wrapper.get("#trail-7").get("button");
-    expect(toReplacement.text()).toBe("Corrected by entry #8");
+    expect(toReplacement.text()).toBe("Corrected by #8");
+    expect(rowFor(wrapper, 8).findAll("td")[1].text()).toContain("Correction");
     const toOriginal = wrapper.get("#trail-8").get("button");
-    expect(toOriginal.text()).toBe("Corrects entry #7");
+    expect(toOriginal.text()).toBe("Corrects #7");
 
     await toReplacement.trigger("click");
     await flushPromises();
@@ -98,6 +114,35 @@ describe("Ledger table", () => {
     await toOriginal.trigger("click");
     await flushPromises();
     expect(document.activeElement).toBe(rowFor(wrapper, 7).element);
+  });
+
+  it("s_ui_20_trail_button_emits_goto", () => {
+    const rows = seedTransactions.filter((t) => t.id === 7);
+    const wrapper = mount(LedgerTable, { props: { rows, categories } });
+    return wrapper.get("#trail-7").get("button").trigger("click").then(() => {
+      expect(wrapper.emitted("goto")?.[0]).toEqual([8]);
+    });
+  });
+
+  it("focusing_a_row_flashes_it_for_1200ms", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(LedgerTable, { props: { rows: seedTransactions.slice(0, 1), categories }, attachTo: document.body });
+      const row = wrapper.get("#tx-1");
+      expect(row.attributes("data-flash")).toBeUndefined();
+      (row.element as HTMLElement).focus();
+      await wrapper.vm.$nextTick();
+      expect(row.attributes("data-flash")).toBeDefined();
+      vi.advanceTimersByTime(1199);
+      await wrapper.vm.$nextTick();
+      expect(row.attributes("data-flash")).toBeDefined();
+      vi.advanceTimersByTime(2);
+      await wrapper.vm.$nextTick();
+      expect(row.attributes("data-flash")).toBeUndefined();
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("corrected_link_turns_on_show_voided_when_original_is_hidden", async () => {
@@ -112,7 +157,7 @@ describe("Ledger table", () => {
     expect(document.activeElement).toBe(wrapper.get("#tx-7").element);
   });
 
-  it("s_ui_3_reclassified_row_shows_history", async () => {
+  it("s_ui_20_reclassified_row_shows_history", async () => {
     const wrapper = await launch();
     expect(wrapper.get("#trail-4").text()).toContain(
       "Category changed from Needs a category to Office expense: Ink and paper are office supplies",
@@ -124,6 +169,6 @@ describe("Ledger table", () => {
     const row = { ...seedTransactions[4], category: "uncategorized", category_label: "Needs a category", schedule_c_line: null, classification_history: [] };
     const wrapper = mount(LedgerTable, { props: { rows: [row], categories } });
     expect(wrapper.text()).toContain("Needs a category");
-    expect(wrapper.text()).not.toContain("Sch. C");
+    expect(wrapper.text()).not.toContain("line ");
   });
 });

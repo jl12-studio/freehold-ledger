@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ConnectAgentPanel from "./components/ConnectAgentPanel.vue";
+import AppFooter from "./components/AppFooter.vue";
 import AppHeader from "./components/AppHeader.vue";
 import EmptyState from "./components/EmptyState.vue";
 import ErrorState from "./components/ErrorState.vue";
@@ -43,6 +44,8 @@ const rows = ref<Transaction[]>([]);
 const categories = ref<Category[]>([]);
 const sources = ref<string[]>([]);
 const paymentMethods = ref<PaymentMethod[]>([]);
+const visibleRows = computed(() => (filters.value.include_voided ? rows.value : rows.value.filter((r) => !r.void)));
+const voidedHidden = computed(() => rows.value.length - visibleRows.value.length);
 const listError = ref<string | null>(null);
 let fetchToken = 0;
 let inflight: Promise<void> = Promise.resolve();
@@ -66,7 +69,7 @@ async function fetchRows() {
   const token = ++fetchToken;
   if (selectedId.value === null) return;
   try {
-    const result = await listTransactions({ ...toFilter(filters.value), business_id: selectedId.value });
+    const result = await listTransactions(toFilter(filters.value, selectedId.value));
     if (token !== fetchToken) return;
     rows.value = result;
     listError.value = null;
@@ -111,7 +114,8 @@ async function goTo(id: number) {
     await settle();
   }
   if (!rows.value.some((r) => r.id === id) && isDirty(filters.value)) {
-    clearFilters();
+    // Clear everything but keep voided rows visible, so the target can show.
+    filters.value = { ...DEFAULT_FILTERS, include_voided: true };
     await settle();
   }
   await nextTick();
@@ -163,18 +167,17 @@ onBeforeUnmount(() => clearTimeout(loadingTimer));
 </script>
 
 <template>
+  <div class="flex min-h-dvh flex-col">
   <AppHeader
-    :path="path"
     :show-export="state === 'ready' || state === 'empty'"
     :businesses="businesses"
     :selected-id="selectedId"
     :current-id="info?.current_business_id ?? null"
     @select="selectBusiness"
-    @reveal="reveal"
     @connect="connect"
   />
   <ConnectAgentPanel ref="connectPanel" />
-  <main>
+  <main class="flex-1">
     <p v-if="state === 'loading' && showLoading" class="max-w-measure mx-auto px-6 pt-16 text-ui text-muted">
       Opening your ledger…
     </p>
@@ -185,19 +188,23 @@ onBeforeUnmount(() => clearTimeout(loadingTimer));
       :current-name="currentName"
       :is-current="selected !== null && selected.id === info?.current_business_id"
       @reveal="reveal" @connect="connect" />
-    <section v-else-if="state === 'ready' && info" class="max-w-page mx-auto px-6 pt-8 pb-16">
+    <section v-else-if="state === 'ready' && info" class="mx-auto w-full max-w-[72rem] px-6 pt-6 pb-12">
       <p class="sr-only">Your ledger is open.</p>
-      <LedgerFilters v-model="filters" :categories="categories" :sources="sources" :payment-methods="paymentMethods" @clear="clearFilters" />
+      <LedgerFilters
+        v-model="filters" :categories="categories" :sources="sources" :payment-methods="paymentMethods"
+        :shown="visibleRows.length" :voided-hidden="voidedHidden" @clear="clearFilters" />
       <p v-if="listError" role="alert" class="pb-4 text-ui">{{ listError }}</p>
-      <LedgerTable v-if="rows.length > 0" :rows="rows" :categories="categories" @goto="goTo" />
+      <LedgerTable v-if="visibleRows.length > 0" :rows="visibleRows" :categories="categories" @goto="goTo" />
       <div v-else-if="!listError" class="pt-8">
         <p class="font-serif text-body">No entries match these filters.</p>
         <button
           type="button"
-          class="mt-3 min-h-9 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
+          class="link mt-3"
           @click="clearFilters"
-        >Clear filters</button>
+        >Clear all</button>
       </div>
     </section>
   </main>
+  <AppFooter v-if="path" :path="path" @reveal="reveal" />
+  </div>
 </template>

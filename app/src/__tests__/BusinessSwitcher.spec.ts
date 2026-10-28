@@ -36,6 +36,8 @@ describe("Business switcher in the window", () => {
     const el = select(wrapper).element as HTMLSelectElement;
     expect(el.selectedOptions[0].text).toBe("My business");
     expect(wrapper.text()).toContain("Your agent records here");
+    await wrapper.get("input[type='checkbox']").setValue(true);
+    await flushPromises();
     expect(ids(wrapper)).toHaveLength(10);
     expect(wrapper.find(".chip-test").exists()).toBe(false);
     expect(wrapper.get("label[for='business-select']").text()).toBe("Business");
@@ -93,9 +95,9 @@ describe("Business switcher in the window", () => {
     localStorage.setItem(KEY, "2");
     const wrapper = await launch();
 
-    await wrapper.get("select[name='payment_method']").setValue("5");
+    await wrapper.get("select[aria-label='Payment method']").setValue("5");
     await flushPromises();
-    await wrapper.get("select[name='kind']").setValue("expense");
+    await wrapper.get("input[type='radio'][name='kind']:not([value=''])").setValue(true);
     await flushPromises();
     expect(callsOf("list_transactions").pop()![1].filter).toMatchObject({ payment_method: "5", kind: "expense", business_id: 2 });
 

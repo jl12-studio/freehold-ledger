@@ -15,20 +15,20 @@ defineEmits<{ reveal: []; connect: [] }>();
     <p v-else class="mt-4 font-serif text-body">
       Tell your agent which business to record in, for example: “switch to {{ businessName }}”.
     </p>
-    <p class="mt-3 text-ui text-muted">
+    <p class="mt-3 label">
       This file is yours: copy it, back it up, open it with any SQLite tool.
     </p>
-    <div class="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2">
+    <div class="mt-6 flex flex-wrap items-center gap-4">
       <button
         type="button"
-        class="min-h-8 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
+        class="btn btn-primary"
         @click="$emit('connect')"
       >
         Connect your agent
       </button>
       <button
         type="button"
-        class="min-h-8 cursor-pointer text-ui font-[560] underline decoration-accent underline-offset-4 hover:text-accent"
+        class="link"
         @click="$emit('reveal')"
       >
         Show the ledger file
