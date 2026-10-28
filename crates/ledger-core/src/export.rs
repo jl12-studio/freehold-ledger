@@ -166,7 +166,45 @@ fn build(rows: &[Transaction]) -> Files {
     f
 }
 
-fn readme(year: i32, s: &Summary, empty: bool) -> String {
+fn entries(n: &str) -> String {
+    format!("{n} {}", if n == "1" { "entry" } else { "entries" })
+}
+
+/// The year's numbers in prose, so a reader of README.txt alone can answer
+/// "what goes on Schedule C line 22" and "which entries are assets".
+fn at_a_glance(f: &Files) -> String {
+    let mut t = String::from("AT A GLANCE\n\nExpenses by Schedule C line (active entries; the same numbers as expenses-by-category.csv):\n");
+    if f.by_category.is_empty() {
+        t.push_str("- None.\n");
+    }
+    for r in &f.by_category {
+        let line = if r[0].is_empty() { "No line yet".to_string() } else { format!("Line {}", r[0]) };
+        t.push_str(&format!("- {line} {} ({}): ${} from {}\n", r[2], r[1], r[3], entries(&r[5])));
+    }
+    t.push_str("\nIncome by who paid (active entries; the same numbers as income-by-source.csv):\n");
+    if f.by_source.is_empty() {
+        t.push_str("- None.\n");
+    }
+    for r in &f.by_source {
+        t.push_str(&format!("- {} ({}): ${} from {}\n", r[0], r[1], r[2], entries(&r[4])));
+    }
+    t.push_str(
+        "\nAssets, meaning equipment or property kept longer than a year (the same rows as assets.csv). \
+Each asset's amount is also included in its category's total above and in expenses-by-category.csv, \
+so if an asset is depreciated or deducted on its own it should not be counted again in that category:\n",
+    );
+    if f.assets.is_empty() {
+        t.push_str("- None.\n");
+    }
+    for r in &f.assets {
+        let line = if r[5].is_empty() { String::new() } else { format!(", Schedule C line {}", r[5]) };
+        t.push_str(&format!("- Entry {}, {}, {}: ${}, category {}{line}\n", r[0], r[1], r[2], r[3], r[4]));
+    }
+    t.push('\n');
+    t
+}
+
+fn readme(year: i32, s: &Summary, f: &Files, empty: bool) -> String {
     let mut t = String::new();
     if empty {
         t.push_str(&format!("No entries were recorded for {year}.\n\n"));
@@ -194,6 +232,7 @@ Freehold Ledger does not give tax advice; your preparer decides how to treat ass
         s.uncategorized.count,
         s.voided_excluded,
     ));
+    t.push_str(&at_a_glance(f));
     t.push_str(
         "FILES\n\n\
 transactions.csv: every entry dated in the year, voided ones included. Columns: id (the entry number); date; kind (expense or income); description; amount (dollars); amount_cents; category_key (the current category); category_label (its plain name); schedule_c_line (the Schedule C line, blank for uncategorized); is_asset (yes if it is equipment or property kept longer than a year); income_source (who paid, for income); status (active or voided); voided_reason (why it was voided); replaces_id (the older entry this one replaced); replaced_by_id (the newer entry that replaced this one); original_category_key (the category when first recorded); recorded_at (when it was entered, UTC).\n\n\
@@ -312,7 +351,7 @@ fn write_all(
     let p = dir.join("summary.json");
     std::fs::write(&p, serde_json::to_string_pretty(&j).expect("json") + "\n").map_err(|e| fail(&p, e))?;
     let p = dir.join("README.txt");
-    std::fs::write(&p, readme(year, summary, rows.is_empty())).map_err(|e| fail(&p, e))?;
+    std::fs::write(&p, readme(year, summary, f, rows.is_empty())).map_err(|e| fail(&p, e))?;
     Ok(vec![
         "transactions.csv",
         "expenses-by-category.csv",

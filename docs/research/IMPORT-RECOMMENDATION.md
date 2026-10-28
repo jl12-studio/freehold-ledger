@@ -34,7 +34,7 @@ Where it fell short:
 ## Hard parts, with evidence
 
 1. **Column mapping:** not hard. The agent read both headers and mapped them with no instruction. Cost: zero tool calls beyond one Read.
-2. **Sign conventions:** handled in all 41 landed rows. The risk is the reverse convention (credit cards export charges as positive); the agent reasoned from the balance column here, which a card export may not have.
+2. **Sign conventions:** handled in every landed row (60 across the three runs). The risk is the reverse convention (credit cards export charges as positive); the agent reasoned from the balance column here, which a card export may not have.
 3. **Refunds:** the real gap (above). The data model has no negative amount by design.
 4. **Duplicate detection:** the agent only sees duplicates inside one file in one session. Importing the same file twice, or two overlapping exports, would silently double the ledger. This is the most likely real-world damage.
 5. **Classifying hundreds of rows:** cost and time scale linearly: about $0.016 per row and 2.5 to 3 s per row of agent time (one tool call per row, roughly 1 call per row plus 5 fixed). 500 rows is roughly 25 to 30 minutes and $8 in one session, with a long context; the 25-row files already needed 25 to 28 turns. Batch the file into chunks of about 50 rows.

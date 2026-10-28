@@ -31,7 +31,9 @@ async function run() {
   } catch (e) {
     const message =
       e && typeof e === "object" && "message" in e ? (e as AppError).message : String(e);
-    outcome.value = { ok: false, message };
+    // The core's own export errors already end "Nothing was created."; do not say it twice.
+    const said = /nothing was (created|written)/i.test(message);
+    outcome.value = { ok: false, message: said ? message : `${message} Nothing was written.` };
   } finally {
     working.value = false;
   }
@@ -77,7 +79,7 @@ function reveal() {
         Show in Finder
       </button>
     </template>
-    <span v-else class="min-w-0 break-words">{{ outcome.message }} Nothing was written.</span>
+    <span v-else class="min-w-0 break-words">{{ outcome.message }}</span>
     <button
       type="button"
       class="min-h-8 cursor-pointer text-ui underline decoration-accent underline-offset-4 hover:text-accent"

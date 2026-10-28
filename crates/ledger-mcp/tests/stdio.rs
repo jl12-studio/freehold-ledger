@@ -433,3 +433,21 @@ async fn export_tool_rejects_relative_destination() {
     assert!(text(&r).contains("full folder path"), "{}", text(&r));
     client.cancel().await.ok();
 }
+
+#[tokio::test]
+async fn unknown_category_filter_is_a_tool_error_not_an_empty_answer() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    for (tool, args) in [
+        ("summarize", json!({ "from": "2026-01-01", "to": "2026-12-31", "category": "software" })),
+        ("list_transactions", json!({ "category": "software" })),
+    ] {
+        let r = call(&client, tool, args).await;
+        assert!(is_error(&r), "{tool} accepted an unknown category: {}", text(&r));
+        assert!(text(&r).contains("\"software\" is not a category key") && text(&r).contains("office_expense"), "{}", text(&r));
+    }
+    // A real key still filters.
+    let v = ok_json(&call(&client, "summarize", json!({ "from": "2026-01-01", "to": "2026-12-31", "category": "supplies" })).await);
+    assert_eq!(v["expenses_total_cents"], 60000);
+    client.cancel().await.ok();
+}

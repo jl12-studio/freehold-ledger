@@ -159,6 +159,21 @@ fn format_dollars(cents: i64) -> String {
     format!("{sign}${grouped}.{:02}", abs % 100)
 }
 
+/// A category used as a filter must be a real key: an unknown one would silently match nothing
+/// and read as "you spent $0 on that".
+fn check_filter_category(c: &Option<String>) -> Result<(), ToolError> {
+    match c.as_deref() {
+        Some(k) if ledger_core::category(k).is_none() => {
+            let keys: Vec<&str> = ledger_core::categories().iter().map(|c| c.key).collect();
+            Err(ToolError::Input(format!(
+                "\"{k}\" is not a category key. Valid categories: {}. Call list_categories for labels and Schedule C lines.",
+                keys.join(", ")
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn parse_date_arg(d: &Option<String>) -> Result<Option<chrono::NaiveDate>, ToolError> {
     d.as_deref().map(|s| ledger_core::parse_date(s).map_err(ToolError::from)).transpose()
 }
@@ -438,6 +453,7 @@ impl LedgerTools {
     fn list_transactions(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: ListTransactionsInput = parse_args(args)?;
+            check_filter_category(&i.category)?;
             let limit = i.limit.unwrap_or(50);
             if !(1..=500).contains(&limit) {
                 return Err(ToolError::Input("limit must be between 1 and 500.".into()));
@@ -538,6 +554,7 @@ impl LedgerTools {
     fn summarize(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: SummarizeInput = parse_args(args)?;
+            check_filter_category(&i.category)?;
             let (from, to) = match (i.period, parse_date_arg(&i.from)?, parse_date_arg(&i.to)?) {
                 (Some(p), None, None) => {
                     ledger_core::resolve_period(p.into(), chrono::Local::now().date_naive())

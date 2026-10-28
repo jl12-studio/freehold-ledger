@@ -73,6 +73,25 @@ describe("Export tax year control", () => {
     expect(status.text()).not.toContain("Exported");
   });
 
+  it("export_error_from_core_says_nothing_was_written_only_once", async () => {
+    withExport(() =>
+      Promise.reject({
+        kind: "other",
+        message: "Could not write the export to /Users/pat/Documents: permission denied. Nothing was created.",
+        path: "",
+      }),
+    );
+    const wrapper = await launch();
+
+    const button = wrapper.findAll("button").find((b) => b.text() === "Export")!;
+    await button.trigger("click");
+    await flushPromises();
+
+    const text = wrapper.get("[role='status']").text();
+    expect(text).toContain("permission denied. Nothing was created.");
+    expect(text).not.toContain("Nothing was written.");
+  });
+
   it("export_button_is_aria_disabled_while_working", async () => {
     let finish!: (v: unknown) => void;
     withExport(() => new Promise((r) => (finish = r)));

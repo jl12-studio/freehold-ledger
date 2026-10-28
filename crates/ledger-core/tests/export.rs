@@ -177,3 +177,25 @@ fn csv_escapes_commas_quotes_and_newlines() {
     assert_eq!(rows[0][col(&h, "description")], desc);
     assert_eq!(rows[0][col(&h, "amount")], "123.45");
 }
+
+#[test]
+fn readme_alone_answers_line_22_and_which_entries_are_assets() {
+    let (_d, l) = common::seeded();
+    let out = tempfile::tempdir().unwrap();
+    let r = l.export_tax_year(2026, Some(out.path())).unwrap();
+    let readme = std::fs::read_to_string(r.folder.join("README.txt")).unwrap();
+    // Seeded 2026: Supplies (line 22) is the $300 laptop plus the $300 corrected monitor.
+    assert!(readme.contains("- Line 22 Supplies (supplies): $600.00 from 2 entries"), "{readme}");
+    assert!(readme.contains("- Line 18 Office expense (office_expense): $42.10 from 1 entry"), "{readme}");
+    assert!(readme.contains("- Upwork (gross_receipts): $1200.00 from 1 entry"), "{readme}");
+    assert!(
+        readme.contains("- Entry 1, 2026-10-20, Laptop for client work: $300.00, category supplies, Schedule C line 22"),
+        "{readme}"
+    );
+    assert!(readme.contains("also included in its category's total"), "{readme}");
+    assert!(!readme.contains('\u{2014}'));
+
+    let empty = l.export_tax_year(2024, Some(out.path())).unwrap();
+    let readme = std::fs::read_to_string(empty.folder.join("README.txt")).unwrap();
+    assert_eq!(readme.matches("- None.").count(), 3, "{readme}");
+}
