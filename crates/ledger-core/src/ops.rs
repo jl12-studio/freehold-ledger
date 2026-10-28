@@ -1,7 +1,7 @@
 use crate::categories::category;
 use crate::db::Ledger;
 use crate::error::LedgerError;
-use crate::payment_methods::{active_in, default_in, find_in};
+use crate::payment_methods::{active_in, default_in, ref_in};
 use crate::model::*;
 use chrono::{NaiveDate, SecondsFormat};
 use rusqlite::{params_from_iter, Connection, OptionalExtension, TransactionBehavior};
@@ -139,7 +139,7 @@ fn map_row(conn: &Connection, r: &rusqlite::Row) -> Result<Transaction> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let pm_id: Option<i64> = r.get("pm_id")?;
     let payment_method = match pm_id {
-        Some(pid) => Some(PaymentMethodRef::from(&find_in(conn, &PaymentMethodKey::Id(pid))?)),
+        Some(pid) => Some(ref_in(conn, pid)?),
         None => None,
     };
     Ok(Transaction {

@@ -69,6 +69,33 @@ pub(crate) fn find_in(conn: &Connection, key: &PaymentMethodKey) -> Result<Payme
     }
 }
 
+/// One method as a transaction shows it, by id. A single-row lookup: `find_in` loads every
+/// method with its transaction count, which is far too slow to run once per listed row.
+pub(crate) fn ref_in(conn: &Connection, id: i64) -> Result<PaymentMethodRef> {
+    conn.query_row(
+        "SELECT p.id, p.kind, \
+           COALESCE((SELECT c.nickname FROM payment_method_changes c WHERE c.payment_method_id = p.id AND c.action = 'rename' ORDER BY c.id DESC LIMIT 1), p.nickname), \
+           p.last4, \
+           EXISTS (SELECT 1 FROM payment_method_changes c WHERE c.payment_method_id = p.id AND c.action = 'retire') \
+         FROM payment_methods p WHERE p.id = ?1",
+        [id],
+        |r| {
+            let kind: String = r.get(1)?;
+            Ok(PaymentMethodRef {
+                id: r.get(0)?,
+                kind: PaymentKind::from_db(&kind),
+                nickname: r.get(2)?,
+                last4: r.get(3)?,
+                retired: r.get::<_, i64>(4)? != 0,
+            })
+        },
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => LedgerError::UnknownPaymentMethod(format!("id {id}")),
+        other => other.into(),
+    })
+}
+
 pub(crate) fn active_in(conn: &Connection, key: &PaymentMethodKey) -> Result<PaymentMethod> {
     let p = find_in(conn, key)?;
     if p.retired {

@@ -195,3 +195,38 @@ fn s_pay_4_corrections_keep_the_method() {
     let c4 = l.correct(c2.replacement.id, "again", Replacement { amount_cents: Some(2700), ..Default::default() }).unwrap();
     assert_eq!(name_of(&c4.replacement), Some("Cash"));
 }
+
+/// Each listed row used to load every payment method with its transaction count, so listing
+/// grew with rows x all transactions (3000 assigned rows took about 28 s). The window lists with
+/// no limit and the export loads the whole year, so this must stay roughly linear.
+#[test]
+fn listing_many_assigned_rows_stays_fast() {
+    let (_d, mut l) = common::empty();
+    l.create_payment_method(pm(PaymentKind::Card, "Business Visa", Some("4242"), true)).unwrap();
+    l.create_payment_method(pm(PaymentKind::Cash, "Cash", None, false)).unwrap();
+    for b in 0..40 {
+        let entries = (0..50)
+            .map(|i| ledger_core::BatchEntry {
+                entry: ledger_core::NewEntry::Expense(NewExpense {
+                    occurred_on: Some(ledger_core::parse_date("2026-03-01").unwrap()),
+                    amount_cents: 100 + i,
+                    description: format!("Row {b}-{i}"),
+                    category: "supplies".into(),
+                    is_asset: false,
+                    payment_method: None,
+                }),
+                allow_duplicate: false,
+                payment_method: None,
+            })
+            .collect();
+        l.record_batch(ledger_core::NewBatch { label: format!("file {b}"), entries, payment_method: None }).unwrap();
+    }
+    l.rename_payment_method(&nick("Business Visa"), "Biz Visa").unwrap();
+    let started = std::time::Instant::now();
+    let rows = l.list(&Filter { include_voided: true, ..Default::default() }).unwrap();
+    let took = started.elapsed();
+    assert_eq!(rows.len(), 2000);
+    let p = rows[0].payment_method.as_ref().unwrap();
+    assert_eq!((p.id, p.nickname.as_str(), p.last4.as_deref(), p.retired), (1, "Biz Visa", Some("4242"), false));
+    assert!(took < std::time::Duration::from_secs(3), "listing 2000 assigned rows took {took:?}");
+}
