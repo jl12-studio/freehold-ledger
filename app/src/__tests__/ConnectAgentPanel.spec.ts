@@ -74,6 +74,9 @@ describe("Connect your agent panel", () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0].text()).toBe(info().agent_message);
     expect(blocks[0].text()).toContain(BUNDLED);
+    expect(dialog.text()).toContain(
+      "Works with AI apps on this computer that support MCP. Browser and phone chats can't connect to a local app yet.",
+    );
     expect(dialog.findAll("button").filter((b) => b.text() === "Copy")).toHaveLength(1);
     expect(dialog.text()).not.toContain("development build");
     wrapper.unmount();

@@ -72,6 +72,10 @@ defineExpose({ open });
     <p class="mt-3 font-serif text-body">
       Copy this message and send it to your AI agent. It will set itself up.
     </p>
+    <p class="mt-1 text-caption text-muted">
+      Works with AI apps on this computer that support MCP. Browser and phone chats can't connect to
+      a local app yet.
+    </p>
 
     <p v-if="loadError" role="alert" class="mt-6 text-ui">{{ loadError }}</p>
     <p v-else-if="!info" class="mt-6 text-ui text-muted">Looking up the settings…</p>

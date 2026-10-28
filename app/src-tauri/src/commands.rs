@@ -260,18 +260,26 @@ fn build_connection_info(server: &Path, ledger: &Path, overridden: bool) -> Conn
     } else {
         String::new()
     };
+    let json_indented = claude_desktop_json
+        .lines()
+        .map(|l| format!("     {l}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let command_indented = format!("     {claude_code_command}");
     let agent_message = format!(
         "Please connect yourself to Freehold Ledger, my bookkeeping app, so you can keep my books for me.\n\
 \n\
-Freehold Ledger has a built-in MCP server that runs on this computer over stdio (it opens no network ports). Add it to your own MCP settings:\n\
+Freehold Ledger has a built-in MCP server that runs on this computer over stdio (it opens no network ports). Add it as a local (stdio) MCP server in your own settings, in whatever format your app uses:\n\
 - name: freehold-ledger\n\
-- command: {server_path}{env_line}\n\
+- command: {server_path}\n\
+- arguments: none{env_line}\n\
 \n\
-If you are Claude Code, run this command:\n\
-{claude_code_command}\n\
-\n\
-If your app keeps MCP servers in a JSON file with an \"mcpServers\" section (Claude Desktop, Cursor, and others), merge this into it:\n\
-{claude_desktop_json}\n\
+Two common formats, as examples:\n\
+- A command line, like Claude Code's:\n\
+{command_indented}\n\
+- A JSON settings file with an \"mcpServers\" section, used by many apps:\n\
+{json_indented}\n\
+If your app uses another format (a different JSON key, TOML, YAML, or a settings screen), translate the name, command, and environment above into it.\n\
 \n\
 If you can't change your own settings, walk me through doing it one step at a time. Once it's added (restart or reload if your app needs that), call the ledger_info tool to confirm you can see my ledger and tell me in one line that it worked. Then read the server's instructions and tool descriptions before recording anything. Never ask me for a full card or account number; the ledger keeps only the last 4 digits."
     );
@@ -389,13 +397,22 @@ mod tests {
         );
         let m = &info.agent_message;
         assert!(m.starts_with("Please connect yourself to Freehold Ledger"));
-        assert!(m.contains("- command: /Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp\n"));
-        assert!(m.contains(&info.claude_code_command));
-        assert!(m.contains(&info.claude_desktop_json));
+        assert!(m.contains(
+            "- name: freehold-ledger\n- command: /Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp\n- arguments: none\n\n"
+        ));
+        assert!(m.contains("local (stdio) MCP server"));
+        assert!(m.contains(&format!("     {}\n", info.claude_code_command)));
+        let indented: Vec<String> =
+            info.claude_desktop_json.lines().map(|l| format!("     {l}")).collect();
+        assert!(m.contains(&indented.join("\n")));
         assert!(m.contains("\"mcpServers\""));
+        assert!(m.contains("translate the name, command, and environment above into it."));
         assert!(m.contains("ledger_info"));
         assert!(!m.contains("FREEHOLD_LEDGER_DB"));
         assert!(!m.contains('\u{2014}'));
+        assert!(!m.contains("Claude Desktop"));
+        assert!(!m.contains("Cursor"));
+        assert!(!m.contains('#'));
     }
 
     #[test]
@@ -418,7 +435,7 @@ mod tests {
             true,
         );
         let m = &info.agent_message;
-        assert!(m.contains("- environment: FREEHOLD_LEDGER_DB=/tmp/a b/l.sqlite3\n"));
+        assert!(m.contains("- arguments: none\n- environment: FREEHOLD_LEDGER_DB=/tmp/a b/l.sqlite3\n"));
         assert!(m.contains("-e FREEHOLD_LEDGER_DB=\"/tmp/a b/l.sqlite3\" --"));
         assert!(m.contains("\"FREEHOLD_LEDGER_DB\": \"/tmp/a b/l.sqlite3\""));
         assert!(!m.contains('\u{2014}'));

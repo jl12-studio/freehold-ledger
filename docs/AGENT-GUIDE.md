@@ -68,7 +68,7 @@ To use a ledger file other than the default, set `FREEHOLD_LEDGER_DB` to its ful
 
 A message starting "Please connect yourself to Freehold Ledger" comes from the app's Connect your agent panel. Do this:
 
-1. Add the `ledger-mcp` server to your own MCP settings with the name `freehold-ledger` and the command path in the message. If the message lists `FREEHOLD_LEDGER_DB`, set it as an environment variable. Use the command or JSON snippet that fits your app.
+1. Add the `ledger-mcp` server to your own MCP settings, in your app's own config format, using the name `freehold-ledger`, the command path in the message (no arguments), and the environment if the message lists `FREEHOLD_LEDGER_DB`. The command line and JSON in the message are examples; translate them if your app uses another format.
 2. If you cannot change your own settings, walk the person through it one step at a time.
 3. Restart or reload if your app needs it, then call `ledger_info`. Tell the person in one line that it worked.
 4. Read the server instructions and the tool list in this guide before recording anything.

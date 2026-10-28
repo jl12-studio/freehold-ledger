@@ -24,13 +24,22 @@ sqlite3 ledger.sqlite3 ".backup backup.sqlite3"
 
 Open the app and press Connect your agent. Press Copy, then paste the message into a chat with your AI agent. The agent adds Freehold Ledger to its own settings and checks that it can see your ledger. If your agent asks you to restart or reload, do that, then say: "What's in my ledger?"
 
-If your agent cannot change its own settings, you can do it by hand. In Claude Code, run this in Terminal (use the path the panel shows):
+The message works with any AI app on your computer that supports MCP. Chats in a browser or on your phone can't connect to a local app yet.
+
+If your agent cannot change its own settings, you can do it by hand. Add a local (stdio) MCP server in your AI app's settings with these facts (use the path the panel shows):
+
+- name: freehold-ledger
+- command: /Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp
+- arguments: none
+- environment: only if you use a different ledger file, set FREEHOLD_LEDGER_DB to its full path
+
+Two common formats, as examples. A command line, like Claude Code's, run in Terminal:
 
 ```
 claude mcp add freehold-ledger -- "/Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp"
 ```
 
-For Claude Desktop, Cursor and others, merge this into the MCP servers file and restart the app:
+A JSON settings file with an "mcpServers" section, used by many apps (merge this in and restart the app):
 
 ```json
 {
