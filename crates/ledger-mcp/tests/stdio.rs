@@ -52,16 +52,21 @@ fn ok_json(r: &CallToolResult) -> Value {
     serde_json::from_str(&text(r)).expect("success content is JSON text")
 }
 
-const TOOLS: [&str; 12] = [
+const TOOLS: [&str; 17] = [
     "correct_transaction",
+    "create_payment_method",
     "export_tax_year",
     "ledger_info",
     "list_categories",
+    "list_payment_methods",
     "list_transactions",
     "reclassify_transaction",
     "record_expense",
     "record_income",
     "record_transactions",
+    "rename_payment_method",
+    "retire_payment_method",
+    "set_default_payment_method",
     "summarize",
     "void_batch",
     "void_transaction",
@@ -80,6 +85,7 @@ async fn s_mcp_1_lists_every_tool_with_descriptions() {
     for t in &tools {
         let desc = t.description.as_deref().unwrap_or("");
         assert!(!desc.trim().is_empty(), "{} has no description", t.name);
+        assert!(!desc.contains('\u{2014}'), "{} description has an em dash", t.name);
         assert_eq!(
             t.input_schema.get("type").and_then(Value::as_str),
             Some("object"),
@@ -343,7 +349,7 @@ async fn ledger_info_and_categories_describe_the_books() {
 
     let info = ok_json(&call(&client, "ledger_info", json!({})).await);
     assert_eq!(info["transaction_count"], 0);
-    assert_eq!(info["schema_version"], 2);
+    assert_eq!(info["schema_version"], 3);
     assert!(info["path"].as_str().unwrap().ends_with("ledger.sqlite3"));
     assert!(info["note"].as_str().unwrap().contains("nothing is ever deleted"));
 
@@ -562,4 +568,135 @@ async fn record_transactions_bad_entry_is_tool_error() {
 
     let info = ok_json(&call(&client, "ledger_info", json!({})).await);
     assert_eq!(info["transaction_count"], 0);
+}
+
+#[tokio::test]
+async fn s_pan_7_no_tool_accepts_a_full_card_number() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let card = "4242 4242 4242 4242";
+    let cases = [
+        ("record_expense", json!({ "amount": "12", "description": format!("Visa {card} exp 12/27"), "category": "supplies" }), "description"),
+        ("record_income", json!({ "amount": "50", "description": "Fee", "source": "Acct 000123456789012" }), "source"),
+        ("void_transaction", json!({ "id": "4242424242424242", "reason": "x" }), "id"),
+        ("record_transactions", json!({ "label": "jan.csv", "entries": [
+            { "kind": "expense", "amount": "5", "description": "Coffee", "date": "2026-01-02", "category": "meals" },
+            { "kind": "expense", "amount": "6", "description": format!("Card {card}"), "date": "2026-01-03", "category": "meals" }
+        ] }), "description of entry 2"),
+        ("export_tax_year", json!({ "year": 2026, "destination": "/tmp/4242424242424242" }), "destination"),
+        ("list_transactions", json!({ "source": "4242-4242-4242-4242" }), "source"),
+    ];
+    for (tool, args, field) in cases {
+        let r = call(&client, tool, args).await;
+        assert!(is_error(&r), "{tool} accepted a card number");
+        let t = text(&r);
+        assert!(t.starts_with(&format!("The {field} ")), "{tool}: {t}");
+        assert!(t.contains("last 4 digits") && t.contains("nothing was stored"), "{tool}: {t}");
+        assert!(!t.contains("4242") && !t.contains("0001234"), "{tool} echoed the number: {t}");
+    }
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["transaction_count"], 0);
+    // Ordinary numbers still pass.
+    let ok = ok_json(&call(&client, "record_expense", json!({ "amount": "$1,200.50", "description": "Invoice 123456789012 from 2026-01-04", "category": "supplies" })).await);
+    assert_eq!(ok["amount_cents"], 120050);
+    client.cancel().await.ok();
+}
+
+fn note(v: &Value) -> String {
+    let n = v["note"].as_str().expect("note is text").to_string();
+    assert!(!n.contains('\u{2014}'), "note has an em dash: {n}");
+    n
+}
+
+#[tokio::test]
+async fn s_mcp_7_card_by_conversation() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+
+    let v = ok_json(&call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "Business Visa", "last4": "4242", "make_default": true })).await);
+    assert_eq!(v["is_default"], true);
+    let n = note(&v);
+    assert!(n.contains("Business Visa (card ending 4242)"), "{n}");
+    assert!(n.contains("never a full number"), "{n}");
+
+    let v = ok_json(&call(&client, "create_payment_method", json!({ "kind": "cash", "nickname": "Cash" })).await);
+    assert!(note(&v).contains("Business Visa stays the default"));
+
+    let v = ok_json(&call(&client, "list_payment_methods", json!({})).await);
+    assert_eq!(v["count"], 2);
+    assert_eq!(v["payment_methods"][0]["nickname"], "Business Visa");
+    let n = note(&v);
+    assert!(n.contains("Business Visa"), "{n}");
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_8_payment_method_refusals() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "Business Visa", "last4": "4242", "make_default": true })).await);
+    ok_json(&call(&client, "create_payment_method", json!({ "kind": "cash", "nickname": "Cash" })).await);
+
+    let r = call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "X", "last4": "4242 4242 4242 4242" })).await;
+    assert!(is_error(&r));
+    let t = text(&r);
+    assert!(t.contains("last 4 digits") && t.contains("nothing was stored"), "{t}");
+    assert!(!t.contains("4242 4242"), "{t}");
+
+    let r = call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "X", "last4": "42424" })).await;
+    assert!(is_error(&r) && text(&r).contains("exactly 4 digits"), "{}", text(&r));
+
+    for field in ["card_number", "expiry", "cvv"] {
+        let r = call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "X", field: "1" })).await;
+        assert!(is_error(&r), "{field} must be refused");
+    }
+
+    let r = call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "business visa" })).await;
+    assert!(is_error(&r) && text(&r).contains("already in use"), "{}", text(&r));
+
+    let r = call(&client, "create_payment_method", json!({ "kind": "cash", "nickname": "Petty", "last4": "1234" })).await;
+    assert!(is_error(&r));
+
+    let v = ok_json(&call(&client, "list_payment_methods", json!({})).await);
+    assert_eq!(v["count"], 2);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn s_mcp_9_rename_retire_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let first = ok_json(&call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "Business Visa", "last4": "4242", "make_default": true })).await);
+    ok_json(&call(&client, "create_payment_method", json!({ "kind": "cash", "nickname": "Cash" })).await);
+
+    let v = ok_json(&call(&client, "rename_payment_method", json!({ "payment_method": "business visa", "nickname": "Biz Visa" })).await);
+    assert!(note(&v).contains("Renamed to Biz Visa"));
+    let id = first["id"].clone();
+    let v = ok_json(&call(&client, "rename_payment_method", json!({ "payment_method": id, "nickname": "Biz Visa 2" })).await);
+    assert!(note(&v).contains("Renamed to Biz Visa 2"));
+    ok_json(&call(&client, "rename_payment_method", json!({ "payment_method": "Biz Visa 2", "nickname": "Biz Visa" })).await);
+
+    let v = ok_json(&call(&client, "retire_payment_method", json!({ "payment_method": "Biz Visa" })).await);
+    let n = note(&v);
+    assert!(n.contains("retired, not deleted") && n.contains("no default now"), "{n}");
+
+    let v = ok_json(&call(&client, "list_payment_methods", json!({})).await);
+    assert_eq!(v["count"], 1);
+    let v = ok_json(&call(&client, "list_payment_methods", json!({ "include_retired": true })).await);
+    assert_eq!(v["count"], 2);
+    assert!(v["payment_methods"].as_array().unwrap().iter().any(|p| p["retired"] == true));
+
+    let r = call(&client, "set_default_payment_method", json!({ "payment_method": "Biz Visa" })).await;
+    assert!(is_error(&r) && text(&r).contains("retired"), "{}", text(&r));
+
+    let v = ok_json(&call(&client, "set_default_payment_method", json!({ "payment_method": "Cash" })).await);
+    assert!(note(&v).contains("Cash"));
+    let v = ok_json(&call(&client, "set_default_payment_method", json!({ "clear": true })).await);
+    assert!(note(&v).contains("No default now"));
+
+    assert!(is_error(&call(&client, "set_default_payment_method", json!({})).await));
+    assert!(is_error(&call(&client, "set_default_payment_method", json!({ "payment_method": "Cash", "clear": true })).await));
+    let r = call(&client, "set_default_payment_method", json!({ "payment_method": "Nope" })).await;
+    assert!(is_error(&r) && text(&r).contains("list_payment_methods"), "{}", text(&r));
+    client.cancel().await.ok();
 }

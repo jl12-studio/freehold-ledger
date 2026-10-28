@@ -3,9 +3,11 @@ mod categories;
 mod db;
 mod error;
 mod export;
+mod guard;
 mod migrations;
 mod model;
 mod ops;
+mod payment_methods;
 mod seed;
 mod summary;
 
@@ -14,10 +16,12 @@ pub use error::LedgerError;
 pub use categories::{categories, category, Category};
 pub use model::{
     BatchEntry, BatchResult, BatchVoid, ClassificationChange, Correction, Filter, Kind, NewBatch, NewEntry,
-    NewExpense, NewIncome, RecordedEntry, Replacement, SkippedDuplicate, Transaction, VoidInfo,
+    NewExpense, NewIncome, NewPaymentMethod, PaymentKind, PaymentMethod, PaymentMethodKey, PaymentMethodRef,
+    RecordedEntry, Replacement, SkippedDuplicate, Transaction, VoidInfo,
     MAX_BATCH,
 };
 pub use export::ExportResult;
+pub use guard::{check_no_full_number, MIN_FULL_NUMBER_DIGITS};
 pub use ops::parse_date;
 pub use seed::seed_demo;
 pub use summary::{resolve_period, CategoryTotal, Period, SourceTotal, Summary, SummaryRequest, Totals};

@@ -24,6 +24,30 @@ pub enum LedgerError {
     MissingSource,
     #[error("Add a short reason for this change.")]
     MissingReason,
+    #[error("The {field} looks like it holds a full card number. Freehold Ledger only ever keeps the last 4 digits of a card, so nothing was stored. Leave the number out, or keep just its last 4 digits as last4 on a payment method.")]
+    CardNumberInText { field: String },
+    #[error("The {field} holds a long number that looks like a card, bank account or routing number. Freehold Ledger only ever keeps the last 4 digits, so nothing was stored. Leave the number out, or keep just its last 4 digits.")]
+    AccountNumberInText { field: String },
+    #[error("Give the payment method a short nickname, for example \"Business Visa\".")]
+    MissingNickname,
+    #[error("Keep the nickname to 40 characters or fewer.")]
+    NicknameTooLong,
+    #[error("\"none\" is reserved for entries with no payment method. Pick another nickname.")]
+    NicknameReserved,
+    #[error("A payment method called \"{0}\" is already in use. Pick another nickname, or retire the old one first.")]
+    NicknameTaken(String),
+    #[error("last4 is exactly 4 digits, for example 4242. Freehold Ledger never keeps a full card or account number, so nothing was stored.")]
+    InvalidLast4,
+    #[error("Cash has no number, so leave last4 out.")]
+    Last4NotForCash,
+    #[error("No payment method matches \"{0}\". Call list_payment_methods to see the nicknames and ids.")]
+    UnknownPaymentMethod(String),
+    #[error("More than one retired payment method is called \"{nickname}\" (ids {ids}). Use the id instead.")]
+    AmbiguousPaymentMethod { nickname: String, ids: String },
+    #[error("\"{0}\" is retired, so nothing new can go on it. Use another payment method or create a new one.")]
+    RetiredPaymentMethod(String),
+    #[error("\"{0}\" is already retired.")]
+    AlreadyRetired(String),
     #[error("Dates look like 2026-10-27.")]
     InvalidDate(String),
     #[error("Transaction {0} was not found.")]

@@ -17,7 +17,7 @@ fn s_file_1_fresh_open_creates_owned_ledger() {
     let ledger = Ledger::open(&path).unwrap();
     assert!(path.exists());
     let info = ledger.info().unwrap();
-    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.schema_version, 3);
     assert_eq!(info.transaction_count, 0);
     assert_eq!(ledger.path(), path.as_path());
 }
@@ -73,7 +73,7 @@ fn s_file_4_newer_schema_refused_and_untouched() {
     let before = std::fs::read(&path).unwrap();
     match Ledger::open(&path) {
         Err(LedgerError::NewerSchema { found, supported }) => {
-            assert_eq!((found, supported), (99, 2));
+            assert_eq!((found, supported), (99, 3));
         }
         other => panic!("expected NewerSchema, got {:?}", other.map(|_| ())),
     }
@@ -168,7 +168,7 @@ fn s_file_5_schema_1_file_upgrades() {
     }
     let mut l = Ledger::open(&path).unwrap();
     let info = l.info().unwrap();
-    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.schema_version, 3);
     assert_eq!(info.transaction_count, 1);
     let r = l
         .record_batch(ledger_core::NewBatch {
@@ -214,6 +214,83 @@ fn s_imm_3_batch_tables_are_append_only() {
         let e = c.execute(replace, []).unwrap_err();
         assert!(e.to_string().contains(&expected), "{e}");
     }
+}
+
+#[test]
+fn s_file_6_schema_2_file_upgrades() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    {
+        let c = raw(&path);
+        c.execute_batch(include_str!("../migrations/0001_init.sql")).unwrap();
+        c.execute_batch(include_str!("../migrations/0002_batches.sql")).unwrap();
+        c.execute("INSERT INTO schema_meta (key, value) VALUES ('schema_version','2')", []).unwrap();
+        c.execute(INSERT_TX, []).unwrap();
+    }
+    let mut l = Ledger::open(&path).unwrap();
+    let info = l.info().unwrap();
+    assert_eq!(info.schema_version, 3);
+    assert_eq!(info.transaction_count, 1);
+    let p = l
+        .create_payment_method(ledger_core::NewPaymentMethod {
+            kind: ledger_core::PaymentKind::Cash,
+            nickname: "Cash".into(),
+            last4: None,
+            make_default: false,
+        })
+        .unwrap();
+    assert_eq!(p.id, 1);
+}
+
+#[test]
+fn s_imm_4_payment_method_tables_are_append_only() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    drop(Ledger::open(&path).unwrap());
+    let c = raw(&path);
+    c.execute(INSERT_TX, []).unwrap();
+    c.execute("INSERT INTO payment_methods (kind, nickname, last4, created_at) VALUES ('card','Visa','4242','x')", []).unwrap();
+    c.execute("INSERT INTO payment_method_changes (payment_method_id, action, nickname, recorded_at) VALUES (1,'rename','Biz','x')", []).unwrap();
+    c.execute("INSERT INTO default_payment_method_changes (payment_method_id, recorded_at) VALUES (1,'x')", []).unwrap();
+    c.execute("INSERT INTO payment_method_assignments (transaction_id, payment_method_id, recorded_at) VALUES (1,1,'x')", []).unwrap();
+    for (table, set, replace) in [
+        (
+            "payment_methods",
+            "nickname='x'",
+            "INSERT OR REPLACE INTO payment_methods (id, kind, nickname, created_at) VALUES (1,'cash','x','x')",
+        ),
+        (
+            "payment_method_changes",
+            "nickname='x'",
+            "INSERT OR REPLACE INTO payment_method_changes (id, payment_method_id, action, nickname, recorded_at) VALUES (1,1,'rename','x','x')",
+        ),
+        (
+            "default_payment_method_changes",
+            "payment_method_id=NULL",
+            "INSERT OR REPLACE INTO default_payment_method_changes (id, payment_method_id, recorded_at) VALUES (1,NULL,'x')",
+        ),
+        (
+            "payment_method_assignments",
+            "payment_method_id=2",
+            "INSERT OR REPLACE INTO payment_method_assignments (id, transaction_id, payment_method_id, recorded_at) VALUES (1,1,1,'x')",
+        ),
+    ] {
+        let expected = format!("{table} are append-only");
+        let e = c.execute(&format!("UPDATE {table} SET {set}"), []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+        let e = c.execute(&format!("DELETE FROM {table}"), []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+        let e = c.execute(replace, []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+    }
+    let e = c
+        .execute("INSERT INTO payment_methods (kind, nickname, last4, created_at) VALUES ('card','Y','42424','x')", [])
+        .unwrap_err();
+    assert!(e.to_string().contains("CHECK"), "{e}");
+    let e = c
+        .execute("INSERT INTO payment_methods (kind, nickname, created_at) VALUES ('card','Visa 1234567890123','x')", [])
+        .unwrap_err();
+    assert!(e.to_string().contains("CHECK"), "{e}");
 }
 
 #[test]

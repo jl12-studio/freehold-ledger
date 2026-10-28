@@ -66,8 +66,31 @@ impl LedgerTools {
     }
 }
 
+/// D30: refuse a full card or account number anywhere in a tool's input, before it is read,
+/// stored or echoed. Field names in the message follow the input ("description",
+/// "description of entry 3").
+fn scan_for_full_numbers(args: &JsonObject) -> Result<(), ToolError> {
+    fn walk(v: &Value, field: &str) -> Result<(), ToolError> {
+        match v {
+            Value::String(s) => ledger_core::check_no_full_number(field, s).map_err(ToolError::from),
+            Value::Number(n) => ledger_core::check_no_full_number(field, &n.to_string()).map_err(ToolError::from),
+            Value::Array(a) => a.iter().enumerate().try_for_each(|(i, x)| {
+                let f = if field == "entries" { format!("entry {}", i + 1) } else { field.to_string() };
+                walk(x, &f)
+            }),
+            Value::Object(m) => m.iter().try_for_each(|(k, x)| {
+                let f = if field.is_empty() { k.clone() } else { format!("{k} of {field}") };
+                walk(x, &f)
+            }),
+            _ => Ok(()),
+        }
+    }
+    walk(&Value::Object(args.clone()), "")
+}
+
 /// Parse the raw tool arguments into `T`, turning a serde failure into a readable tool error.
 fn parse_args<T: for<'de> Deserialize<'de>>(args: JsonObject) -> Result<T, ToolError> {
+    scan_for_full_numbers(&args)?;
     serde_json::from_value(Value::Object(args))
         .map_err(|e| ToolError::Input(format!("Could not read the tool input: {e}.")))
 }
@@ -442,6 +465,97 @@ struct ExportInput {
 fn with_note(mut v: Value, note: impl Into<String>) -> Value {
     v["note"] = Value::String(note.into());
     v
+}
+
+/// A payment method as the wire carries it: its id (a number) or its nickname (text, any letter case).
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(untagged)]
+enum PaymentMethodArg {
+    Id(i64),
+    Nickname(String),
+}
+
+impl From<PaymentMethodArg> for ledger_core::PaymentMethodKey {
+    fn from(a: PaymentMethodArg) -> Self {
+        match a {
+            PaymentMethodArg::Id(n) => ledger_core::PaymentMethodKey::Id(n),
+            PaymentMethodArg::Nickname(s) => ledger_core::PaymentMethodKey::Nickname(s),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum PaymentKindArg {
+    Card,
+    BankAccount,
+    Cash,
+    Other,
+}
+
+impl From<PaymentKindArg> for ledger_core::PaymentKind {
+    fn from(k: PaymentKindArg) -> Self {
+        match k {
+            PaymentKindArg::Card => ledger_core::PaymentKind::Card,
+            PaymentKindArg::BankAccount => ledger_core::PaymentKind::BankAccount,
+            PaymentKindArg::Cash => ledger_core::PaymentKind::Cash,
+            PaymentKindArg::Other => ledger_core::PaymentKind::Other,
+        }
+    }
+}
+
+/// "Business Visa (card ending 4242)", "Cash (cash)". Used by every note that names a method.
+fn describe_method(nickname: &str, kind: ledger_core::PaymentKind, last4: Option<&str>) -> String {
+    format!(
+        "{nickname} ({}{})",
+        kind.label().to_lowercase(),
+        last4.map(|l| format!(" ending {l}")).unwrap_or_default()
+    )
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreatePaymentMethodInput {
+    /// "card", "bank_account", "cash" or "other".
+    kind: PaymentKindArg,
+    /// Short name the person uses, for example "Business Visa" or "Chase checking". Unique among payment methods in use, any letter case.
+    nickname: String,
+    /// Only the last 4 digits of the card or account number, for example "4242". Never send a full number. Leave out for cash.
+    last4: Option<String>,
+    /// Use this payment method for new expenses when none is named. Defaults to false.
+    make_default: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListPaymentMethodsInput {
+    /// Also list retired payment methods. Defaults to false.
+    include_retired: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RenamePaymentMethodInput {
+    /// The payment method to rename: its id or its nickname.
+    payment_method: PaymentMethodArg,
+    /// The new nickname.
+    nickname: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RetirePaymentMethodInput {
+    /// The payment method to retire: its id or its nickname.
+    payment_method: PaymentMethodArg,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetDefaultPaymentMethodInput {
+    /// The payment method new expenses should use when none is named.
+    payment_method: Option<PaymentMethodArg>,
+    /// Set true to have no default.
+    clear: Option<bool>,
 }
 
 #[tool_router]
@@ -828,10 +942,141 @@ impl LedgerTools {
             ))
         })())
     }
+
+    #[tool(
+        description = "Add a card, bank account, cash, or other way the business pays or gets paid, under a nickname such as \"Business Visa\", so entries can say what they were paid with. Never ask for or send a full card or account number, expiry date or security code: give only the last 4 digits as last4, if any. Set make_default to use it automatically for new expenses.",
+        input_schema = schema_for_input::<CreatePaymentMethodInput>().expect("schema")
+    )]
+    fn create_payment_method(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: CreatePaymentMethodInput = parse_args(args)?;
+            let new = ledger_core::NewPaymentMethod {
+                kind: i.kind.into(),
+                nickname: i.nickname,
+                last4: i.last4,
+                make_default: i.make_default.unwrap_or(false),
+            };
+            let (p, default) = self.with_ledger(|l| {
+                let p = l.create_payment_method(new)?;
+                let d = l.default_payment_method()?;
+                Ok((p, d))
+            })?;
+            let tail = if p.is_default {
+                " It is now the default for new expenses.".to_string()
+            } else if let Some(d) = default {
+                format!(" {} stays the default for new expenses.", d.nickname)
+            } else {
+                " There is no default yet; ask to make one the default and new expenses will use it.".to_string()
+            };
+            let note = format!(
+                "Saved {}. Only the last 4 digits are kept, never a full number.{tail}",
+                describe_method(&p.nickname, p.kind, p.last4.as_deref())
+            );
+            Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+        })())
+    }
+
+    #[tool(
+        description = "List the cards, bank accounts, cash and other payment methods with their nicknames, last 4 digits, which one is the default, and how many live entries use each. Retired ones are hidden unless include_retired is true. Call this to find a nickname or id before assigning or recording.",
+        input_schema = schema_for_input::<ListPaymentMethodsInput>().expect("schema"),
+        annotations(read_only_hint = true)
+    )]
+    fn list_payment_methods(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: ListPaymentMethodsInput = parse_args(args)?;
+            let list = self.with_ledger(|l| Ok(l.payment_methods(i.include_retired.unwrap_or(false))?))?;
+            let n = list.len();
+            let note = if n == 0 {
+                "No payment methods yet. Create one with create_payment_method, for example a card nicknamed \"Business Visa\" with its last 4 digits.".to_string()
+            } else {
+                let default = match list.iter().find(|p| p.is_default) {
+                    Some(d) => format!("Default for new expenses: {}.", d.nickname),
+                    None => "No default is set.".to_string(),
+                };
+                format!("{n} payment methods. {default} Only nicknames and last 4 digits are kept, never full numbers.")
+            };
+            Ok(with_note(json!({ "payment_methods": list, "count": n }), note))
+        })())
+    }
+
+    #[tool(
+        description = "Change a payment method's nickname, for example after a card is renamed. Entries already on it show the new name; the old name stays in the history.",
+        input_schema = schema_for_input::<RenamePaymentMethodInput>().expect("schema")
+    )]
+    fn rename_payment_method(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: RenamePaymentMethodInput = parse_args(args)?;
+            let key: ledger_core::PaymentMethodKey = i.payment_method.into();
+            let p = self.with_ledger(|l| Ok(l.rename_payment_method(&key, &i.nickname)?))?;
+            let note = format!(
+                "Renamed to {}. Entries already on it now show the new name, and the old name stays in the history.",
+                p.nickname
+            );
+            Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+        })())
+    }
+
+    #[tool(
+        description = "Retire a payment method that is no longer used, such as a closed card. It is never deleted: entries already on it keep it, but nothing new can be recorded on or assigned to it. If it was the default, there is no default afterward.",
+        input_schema = schema_for_input::<RetirePaymentMethodInput>().expect("schema")
+    )]
+    fn retire_payment_method(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: RetirePaymentMethodInput = parse_args(args)?;
+            let key: ledger_core::PaymentMethodKey = i.payment_method.into();
+            let (was_default, p) = self.with_ledger(|l| {
+                let was_default = l.find_payment_method(&key)?.is_default;
+                let p = l.retire_payment_method(&key)?;
+                Ok((was_default, p))
+            })?;
+            let mut note = format!(
+                "{} is retired, not deleted: its {} entries keep it, and nothing new can go on it.",
+                p.nickname, p.transaction_count
+            );
+            if was_default {
+                note.push_str(" It was the default, so there is no default now.");
+            }
+            Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+        })())
+    }
+
+    #[tool(
+        description = "Choose the payment method new expenses use when none is named, or clear the default with clear set to true. There is at most one default, and income never uses it.",
+        input_schema = schema_for_input::<SetDefaultPaymentMethodInput>().expect("schema")
+    )]
+    fn set_default_payment_method(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: SetDefaultPaymentMethodInput = parse_args(args)?;
+            let clear = i.clear.unwrap_or(false);
+            match (i.payment_method, clear) {
+                (Some(pm), false) => {
+                    let key: ledger_core::PaymentMethodKey = pm.into();
+                    let p = self
+                        .with_ledger(|l| Ok(l.set_default_payment_method(Some(&key))?))?
+                        .expect("a chosen default is returned");
+                    let note = format!(
+                        "{} is now the default: new expenses use it when no payment method is named.",
+                        describe_method(&p.nickname, p.kind, p.last4.as_deref())
+                    );
+                    Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
+                }
+                (None, true) => {
+                    self.with_ledger(|l| Ok(l.set_default_payment_method(None)?))?;
+                    Ok(with_note(
+                        json!({ "default": null }),
+                        "No default now: new expenses get no payment method unless one is named.",
+                    ))
+                }
+                _ => Err(ToolError::Input(
+                    "Give payment_method to choose the default, or clear set to true to have none, not both.".into(),
+                )),
+            }
+        })())
+    }
 }
 
 #[tool_handler(
     name = "freehold-ledger",
-    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call."
+    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call. Payment methods (cards, bank accounts, cash) are kept by nickname and last 4 digits only: never ask for, repeat, or send a full card or account number, expiry date or security code."
 )]
 impl ServerHandler for LedgerTools {}

@@ -153,3 +153,94 @@ pub struct BatchResult {
     pub recorded: Vec<RecordedEntry>,
     pub skipped_duplicates: Vec<SkippedDuplicate>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentKind {
+    Card,
+    BankAccount,
+    Cash,
+    Other,
+}
+
+impl PaymentKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            PaymentKind::Card => "card",
+            PaymentKind::BankAccount => "bank_account",
+            PaymentKind::Cash => "cash",
+            PaymentKind::Other => "other",
+        }
+    }
+
+    pub(crate) fn from_db(s: &str) -> PaymentKind {
+        match s {
+            "card" => PaymentKind::Card,
+            "bank_account" => PaymentKind::BankAccount,
+            "cash" => PaymentKind::Cash,
+            _ => PaymentKind::Other,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PaymentKind::Card => "Card",
+            PaymentKind::BankAccount => "Bank account",
+            PaymentKind::Cash => "Cash",
+            PaymentKind::Other => "Other",
+        }
+    }
+}
+
+/// How a caller names a payment method: its id, or its nickname in any letter case.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum PaymentMethodKey {
+    Id(i64),
+    Nickname(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct NewPaymentMethod {
+    pub kind: PaymentKind,
+    pub nickname: String,
+    pub last4: Option<String>,
+    pub make_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PaymentMethod {
+    pub id: i64,
+    pub kind: PaymentKind,
+    /// Current nickname: the latest rename, else the original.
+    pub nickname: String,
+    pub last4: Option<String>,
+    pub is_default: bool,
+    pub retired: bool,
+    pub created_at: String,
+    pub retired_at: Option<String>,
+    /// Live (not voided) transactions whose current payment method is this one.
+    pub transaction_count: i64,
+}
+
+/// What a transaction shows about its payment method.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PaymentMethodRef {
+    pub id: i64,
+    pub kind: PaymentKind,
+    pub nickname: String,
+    pub last4: Option<String>,
+    pub retired: bool,
+}
+
+impl From<&PaymentMethod> for PaymentMethodRef {
+    fn from(p: &PaymentMethod) -> Self {
+        PaymentMethodRef {
+            id: p.id,
+            kind: p.kind,
+            nickname: p.nickname.clone(),
+            last4: p.last4.clone(),
+            retired: p.retired,
+        }
+    }
+}

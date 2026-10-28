@@ -30,7 +30,18 @@ fn check_amount(a: i64) -> Result<()> {
 
 fn check_text(s: &str, e: LedgerError) -> Result<String> {
     let t = s.trim();
-    if t.is_empty() { Err(e) } else { Ok(t.to_string()) }
+    if t.is_empty() {
+        return Err(e);
+    }
+    let field = match e {
+        LedgerError::MissingDescription => "description",
+        LedgerError::MissingReason => "reason",
+        LedgerError::MissingSource => "source",
+        LedgerError::MissingBatchLabel => "label",
+        _ => "text",
+    };
+    crate::guard::check_no_full_number(field, t)?;
+    Ok(t.to_string())
 }
 
 fn check_category(key: &str, kind: Kind) -> Result<()> {
