@@ -74,6 +74,30 @@ pub enum LedgerError {
     MissingBatchLabel,
     #[error("Entry {index}: {reason} Nothing in this batch was recorded.")]
     BatchEntry { index: usize, reason: Box<LedgerError> },
+    #[error("Give the business a short name, for example \"Pat's Prints\".")]
+    MissingBusinessName,
+    #[error("Keep the business name to 60 characters or fewer.")]
+    BusinessNameTooLong,
+    #[error("Keep the business note to 200 characters or fewer.")]
+    BusinessNoteTooLong,
+    #[error("A business called \"{0}\" already exists. Pick another name, or archive the old one first.")]
+    BusinessNameTaken(String),
+    #[error("No business matches \"{0}\". Call list_businesses to see the names and ids.")]
+    UnknownBusiness(String),
+    #[error("More than one archived business is called \"{name}\" (ids {ids}). Use the id instead.")]
+    AmbiguousBusiness { name: String, ids: String },
+    #[error("\"{0}\" is archived, so nothing new can go in it. Restore it with restore_business, or pick another business with switch_business.")]
+    ArchivedBusiness(String),
+    #[error("\"{0}\" is already archived.")]
+    AlreadyArchived(String),
+    #[error("\"{0}\" is not archived.")]
+    NotArchived(String),
+    #[error("No business is selected. Call list_businesses and then switch_business to pick one, or create_business to add one. Nothing was changed.")]
+    NoCurrentBusiness,
+    #[error("\"{nickname}\" belongs to the business \"{business}\". Payment methods are kept per business: create one here, or use that business.")]
+    PaymentMethodInOtherBusiness { nickname: String, business: String },
+    #[error("Transaction {id} is in the business \"{business}\", not this one. Nothing was assigned.")]
+    TransactionInOtherBusiness { id: i64, business: String },
     #[error("Could not write the export to {}: {reason}. Nothing was created.", .path.display())]
     ExportFailed { path: PathBuf, reason: String },
 }

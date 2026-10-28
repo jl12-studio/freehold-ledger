@@ -27,3 +27,24 @@ fn s_seed_1_demo_payment_methods() {
     assert_eq!((visa.kind, visa.last4.as_deref()), (PaymentKind::Card, Some("4242")));
     assert!(l.get(9).unwrap().payment_method.unwrap().retired);
 }
+
+#[test]
+fn s_seed_2_demo_test_shop() {
+    let (_d, mut l) = common::seeded();
+    seed_demo_payment_methods(&mut l).unwrap();
+    seed_demo_businesses(&mut l).unwrap();
+    assert_eq!(l.info().unwrap().transaction_count, 12);
+    assert_eq!(l.info().unwrap().current_business_id, Some(1));
+    let all = l.businesses(true).unwrap();
+    let names: Vec<(&str, bool, i64)> = all.iter().map(|b| (b.name.as_str(), b.is_test, b.transaction_count)).collect();
+    assert_eq!(names, [("My business", false, 10), ("Test shop", true, 2)]);
+    let shop = l.list(&Filter { business_id: Some(2), include_voided: true, ..Default::default() }).unwrap();
+    let ids: Vec<i64> = shop.iter().map(|t| t.id).collect();
+    assert_eq!(ids, [12, 11]);
+    assert_eq!(l.get(11).unwrap().payment_method.unwrap().nickname, "Test card");
+    let key = BusinessKey::Id(2);
+    let methods = l.payment_methods_in(Some(&key), true).unwrap();
+    assert_eq!((methods.len(), methods[0].id, methods[0].is_default), (1, 5, true));
+    assert_eq!(l.payment_methods(true).unwrap().len(), 4);
+    assert_eq!(l.income_sources_in(2).unwrap(), ["Test buyer"]);
+}

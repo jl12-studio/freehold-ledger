@@ -1,4 +1,4 @@
-use ledger_core::{seed_demo, seed_demo_payment_methods, Ledger};
+use ledger_core::{seed_demo, seed_demo_businesses, seed_demo_payment_methods, Ledger};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -26,7 +26,10 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    if let Err(e) = seed_demo(&mut ledger).and_then(|()| seed_demo_payment_methods(&mut ledger)) {
+    if let Err(e) = seed_demo(&mut ledger)
+        .and_then(|()| seed_demo_payment_methods(&mut ledger))
+        .and_then(|()| seed_demo_businesses(&mut ledger))
+    {
         eprintln!("{e}");
         return ExitCode::from(1);
     }

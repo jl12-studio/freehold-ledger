@@ -156,3 +156,105 @@ fn s_pmt_7_ambiguity() {
     assert!(matches!(l.find_payment_method(&nick("nope")), Err(LedgerError::UnknownPaymentMethod(ref s)) if s == "nope"));
     assert!(matches!(l.find_payment_method(&PaymentMethodKey::Id(9)), Err(LedgerError::UnknownPaymentMethod(ref s)) if s == "id 9"));
 }
+
+// ---- Payment methods per business (D53, D55) ----
+
+use chrono::NaiveDate;
+use ledger_core::{BusinessKey, NewBusiness, NewExpense};
+
+fn shop_key() -> BusinessKey {
+    BusinessKey::Name("Test shop".into())
+}
+
+/// My business with a default "Business Visa" (id 1) and a default-less "Checking" (id 2), plus a Test shop.
+fn two_businesses() -> (tempfile::TempDir, Ledger) {
+    let (d, mut l) = common::empty();
+    l.create_payment_method(new(PaymentKind::Card, "Business Visa", Some("4242"), true)).unwrap();
+    card(&mut l, "Checking", "6789");
+    l.create_business(NewBusiness { name: "Test shop".into(), note: None, is_test: true, make_current: false })
+        .unwrap();
+    (d, l)
+}
+
+fn expense(pm: Option<PaymentMethodKey>) -> NewExpense {
+    NewExpense {
+        occurred_on: Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
+        amount_cents: 1999,
+        description: "paper".into(),
+        category: "supplies".into(),
+        is_asset: false,
+        payment_method: pm,
+    }
+}
+
+#[test]
+fn s_pmb_1_nicknames_are_per_business() {
+    let (_d, mut l) = two_businesses();
+    let p = l
+        .create_payment_method_in(Some(&shop_key()), new(PaymentKind::Card, "Business Visa", Some("1111"), false))
+        .unwrap();
+    assert_eq!(p.business_id, 2);
+    let listed = l.payment_methods_in(Some(&shop_key()), true).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, p.id);
+    let e = l
+        .create_payment_method_in(Some(&shop_key()), new(PaymentKind::Card, "business visa", Some("2222"), false))
+        .unwrap_err();
+    assert!(matches!(e, LedgerError::NicknameTaken(_)), "{e:?}");
+}
+
+#[test]
+fn s_pmb_2_each_business_uses_its_own_default() {
+    let (_d, mut l) = two_businesses();
+    let shop_card = l
+        .create_payment_method_in(Some(&shop_key()), new(PaymentKind::Card, "Shop card", Some("1111"), true))
+        .unwrap();
+    let in_shop = l.record_expense_in(Some(&shop_key()), expense(None)).unwrap();
+    assert_eq!(in_shop.payment_method.unwrap().id, shop_card.id);
+    let in_main = l.record_expense_in(None, expense(None)).unwrap();
+    assert_eq!(in_main.payment_method.unwrap().id, 1);
+}
+
+#[test]
+fn s_pmb_3_a_method_of_another_business_is_refused() {
+    let (_d, mut l) = two_businesses();
+    let before = count(&l, "transactions");
+    let e = l.record_expense_in(Some(&shop_key()), expense(Some(PaymentMethodKey::Id(1)))).unwrap_err();
+    match e {
+        LedgerError::PaymentMethodInOtherBusiness { nickname, business } => {
+            assert_eq!(nickname, "Business Visa");
+            assert_eq!(business, "My business");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(count(&l, "transactions"), before);
+    let e = l.record_expense_in(Some(&shop_key()), expense(Some(nick("Checking")))).unwrap_err();
+    assert!(matches!(e, LedgerError::UnknownPaymentMethod(_)), "{e:?}");
+}
+
+#[test]
+fn s_pmb_4_assigning_an_entry_of_another_business_writes_nothing() {
+    let (_d, mut l) = two_businesses();
+    let mine = l.record_expense_in(None, expense(Some(nick("Checking")))).unwrap();
+    let theirs = l.record_expense_in(Some(&shop_key()), expense(None)).unwrap();
+    let before = count(&l, "payment_method_assignments");
+    let e = l.assign_payment_method_in(None, &nick("Business Visa"), &[mine.id, theirs.id]).unwrap_err();
+    match e {
+        LedgerError::TransactionInOtherBusiness { id, business } => {
+            assert_eq!(id, theirs.id);
+            assert_eq!(business, "Test shop");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(count(&l, "payment_method_assignments"), before);
+}
+
+#[test]
+fn s_pmb_5_retiring_a_default_clears_only_its_business() {
+    let (_d, mut l) = two_businesses();
+    l.create_payment_method_in(Some(&shop_key()), new(PaymentKind::Card, "Shop card", Some("1111"), true))
+        .unwrap();
+    l.retire_payment_method(&nick("Business Visa")).unwrap();
+    assert!(l.default_payment_method_in(None).unwrap().is_none());
+    assert_eq!(l.default_payment_method_in(Some(&shop_key())).unwrap().unwrap().nickname, "Shop card");
+}

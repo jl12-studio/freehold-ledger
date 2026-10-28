@@ -1,6 +1,6 @@
 use crate::db::Ledger;
 use crate::error::LedgerError;
-use crate::model::{NewExpense, NewIncome, NewPaymentMethod, PaymentKind, PaymentMethodKey, Replacement};
+use crate::model::{BusinessKey, NewBusiness, NewExpense, NewIncome, NewPaymentMethod, PaymentKind, PaymentMethodKey, Replacement};
 use crate::ops::parse_date;
 
 /// Records the fixed demo ledger used by tests, smokes and the seed example.
@@ -65,5 +65,51 @@ pub fn seed_demo_payment_methods(l: &mut Ledger) -> Result<(), LedgerError> {
     l.assign_payment_method(&key("Cash"), &[4])?;
     l.assign_payment_method(&key("Old Amex"), &[9])?;
     l.retire_payment_method(&key("Old Amex"))?;
+    Ok(())
+}
+
+/// Adds a test business on top of `seed_demo` and `seed_demo_payment_methods` (run those first):
+/// "Test shop" (id 2, a test business) with card "Test card" ending 1111 (its default, id 5),
+/// expense 11 "Test sticker order" $12.00 supplies on 2026-10-01 (on Test card by default) and
+/// income 12 "Test sale" $30.00 from "Test buyer" on 2026-10-02. "My business" stays current.
+pub fn seed_demo_businesses(l: &mut Ledger) -> Result<(), LedgerError> {
+    let shop = l.create_business(NewBusiness {
+        name: "Test shop".to_string(),
+        note: Some("For trying things out".to_string()),
+        is_test: true,
+        make_current: false,
+    })?;
+    let key = BusinessKey::Id(shop.id);
+    l.create_payment_method_in(
+        Some(&key),
+        NewPaymentMethod {
+            kind: PaymentKind::Card,
+            nickname: "Test card".to_string(),
+            last4: Some("1111".to_string()),
+            make_default: true,
+        },
+    )?;
+    l.record_expense_in(
+        Some(&key),
+        NewExpense {
+            occurred_on: Some(parse_date("2026-10-01")?),
+            amount_cents: 1200,
+            description: "Test sticker order".to_string(),
+            category: "supplies".to_string(),
+            is_asset: false,
+            payment_method: None,
+        },
+    )?;
+    l.record_income_in(
+        Some(&key),
+        NewIncome {
+            occurred_on: Some(parse_date("2026-10-02")?),
+            amount_cents: 3000,
+            description: "Test sale".to_string(),
+            category: None,
+            source: "Test buyer".to_string(),
+            payment_method: None,
+        },
+    )?;
     Ok(())
 }

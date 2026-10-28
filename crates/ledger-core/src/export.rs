@@ -2,7 +2,7 @@
 use crate::categories::categories;
 use crate::db::Ledger;
 use crate::error::LedgerError;
-use crate::model::{Filter, Kind, Transaction};
+use crate::model::{Business, BusinessKey, Filter, Kind, Transaction};
 use crate::summary::{Summary, SummaryRequest};
 use chrono::NaiveDate;
 use serde_json::Value;
@@ -16,6 +16,7 @@ pub struct ExportResult {
     pub folder: PathBuf,
     pub files: Vec<String>,
     pub summary: Summary,
+    pub business: Business,
 }
 
 fn dollars(cents: i64) -> String {
@@ -206,13 +207,14 @@ so if an asset is depreciated or deducted on its own it should not be counted ag
     t
 }
 
-fn readme(year: i32, s: &Summary, f: &Files, empty: bool) -> String {
+fn readme(year: i32, b: &Business, s: &Summary, f: &Files, empty: bool) -> String {
     let mut t = String::new();
     if empty {
         t.push_str(&format!("No entries were recorded for {year}.\n\n"));
     }
     t.push_str(&format!(
         "FREEHOLD LEDGER {year} EXPORT\n\n\
+Business: {}.\n\n{}\
 This folder is a copy of the bookkeeping for {year}, written so that an accountant, a tax preparer or an AI assistant can read it without asking questions. \
 Every .csv file opens in Numbers, Excel or Google Sheets. summary.json holds the same totals for software.\n\n\
 Period: {} to {}.\n\n\
@@ -223,6 +225,12 @@ Money is in US dollars. In the CSV files, amounts have two decimals and no symbo
 Voided entries are included for the record but excluded from all totals. Nothing in the ledger is ever deleted or edited; mistakes are voided or corrected and the history stays.\n\n\
 Categories follow the IRS Schedule C (Form 1040) lines, for example line 22 is Supplies and line 18 is Office expense. Income on line 1 is gross receipts or sales. \"uncategorized\" (\"Needs a category\") has no line and should be sorted out before filing.\n\n\
 Freehold Ledger does not give tax advice; your preparer decides how to treat assets.\n\n",
+        b.name,
+        if b.is_test {
+            "This is a test business: its entries are for trying things out and are not real books.\n\n"
+        } else {
+            ""
+        },
         s.from,
         s.to,
         money_text(s.income_total_cents),
@@ -242,14 +250,29 @@ expenses-by-category.csv: active expenses added up by category, in Schedule C li
 income-by-source.csv: active income added up by who paid. Columns: income_source; category_key (income category); total (dollars); total_cents; count.\n\n\
 assets.csv: active expenses marked as assets, listed one per row. Columns: id; date; description; amount (dollars); category_key; schedule_c_line. Freehold Ledger does not compute depreciation.\n\n\
 corrections.csv: the full correction trail, one row per void and per category change. Columns: transaction_id (the entry affected); action (voided or reclassified); detail (what changed); reason (the reason given); recorded_at (when, UTC); replacement_id (the entry that replaced a voided one, if any).\n\n\
-summary.json: the totals for the whole year as software-readable data: expenses_total_cents, income_total_cents, profit_cents, by_category, by_source, assets, uncategorized, voided_excluded, plus generated_at, app_version and schema_version.\n\n\
+summary.json: the totals for the whole year as software-readable data: expenses_total_cents, income_total_cents, profit_cents, by_category, by_source, assets, uncategorized, voided_excluded, plus business, is_test_business, generated_at, app_version and schema_version.\n\n\
 README.txt: this file.\n",
     );
     t
 }
 
-fn pick_folder(parent: &Path, year: i32) -> PathBuf {
-    let base = format!("Freehold Ledger {year} export");
+fn safe_folder_name(name: &str) -> String {
+    let replaced: String = name
+        .chars()
+        .map(|c| if "/\\:*?\"<>|".contains(c) || c.is_control() { '-' } else { c })
+        .collect();
+    let collapsed = replaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = collapsed.trim_start_matches('.').trim();
+    if trimmed.is_empty() { "Business".to_string() } else { trimmed.to_string() }
+}
+
+fn pick_folder(parent: &Path, year: i32, name: &str, is_test: bool) -> PathBuf {
+    let safe = safe_folder_name(name);
+    let base = if is_test {
+        format!("Freehold Ledger {safe} (test) {year} export")
+    } else {
+        format!("Freehold Ledger {safe} {year} export")
+    };
     let first = parent.join(&base);
     if !first.exists() {
         return first;
@@ -264,6 +287,20 @@ impl Ledger {
     /// Writes `Freehold Ledger {year} export` under `dest_parent` (default: Documents/Freehold Ledger/exports).
     /// Everything is written to a temporary folder first and renamed into place, so a failure leaves nothing.
     pub fn export_tax_year(&self, year: i32, dest_parent: Option<&Path>) -> Result<ExportResult> {
+        self.export_tax_year_in(year, None, dest_parent)
+    }
+
+    /// Same as `export_tax_year` for one business: the named one (archived allowed) or the current one.
+    pub fn export_tax_year_in(
+        &self,
+        year: i32,
+        business: Option<&BusinessKey>,
+        dest_parent: Option<&Path>,
+    ) -> Result<ExportResult> {
+        let biz = match business {
+            Some(k) => self.find_business(k)?,
+            None => self.current_business()?.ok_or(LedgerError::NoCurrentBusiness)?,
+        };
         let invalid = || LedgerError::InvalidDate(format!("{year}"));
         let from = NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(invalid)?;
         let to = NaiveDate::from_ymd_opt(year, 12, 31).ok_or_else(invalid)?;
@@ -275,9 +312,9 @@ impl Ledger {
                 .join("exports"),
         };
 
-        let mut rows = self.list(&Filter { from: Some(from), to: Some(to), include_voided: true, ..Default::default() })?;
+        let mut rows = self.list(&Filter { from: Some(from), to: Some(to), include_voided: true, business_id: Some(biz.id), ..Default::default() })?;
         rows.sort_by_key(|t| (t.occurred_on, t.id));
-        let summary = self.summarize(&SummaryRequest { from, to, category: None, source: None, is_asset: None, payment_method: None })?;
+        let summary = self.summarize(&SummaryRequest { from, to, category: None, source: None, is_asset: None, payment_method: None, business_id: Some(biz.id) })?;
         let schema_version = self.info()?.schema_version;
         let files = build(&rows);
 
@@ -291,13 +328,13 @@ impl Ledger {
                 .unwrap_or(0)
         ));
         std::fs::create_dir(&tmp).map_err(|e| fail(&parent, e))?;
-        let written = write_all(&tmp, year, &rows, &files, &summary, schema_version).and_then(|names| {
-            let dest = pick_folder(&parent, year);
+        let written = write_all(&tmp, year, &biz, &rows, &files, &summary, schema_version).and_then(|names| {
+            let dest = pick_folder(&parent, year, &biz.name, biz.is_test);
             std::fs::rename(&tmp, &dest).map_err(|e| fail(&dest, e))?;
             Ok((dest, names))
         });
         match written {
-            Ok((folder, names)) => Ok(ExportResult { folder, files: names, summary }),
+            Ok((folder, names)) => Ok(ExportResult { folder, files: names, summary, business: biz }),
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&tmp);
                 Err(e)
@@ -309,6 +346,7 @@ impl Ledger {
 fn write_all(
     dir: &Path,
     year: i32,
+    biz: &Business,
     rows: &[Transaction],
     f: &Files,
     summary: &Summary,
@@ -347,6 +385,8 @@ fn write_all(
     let mut j = serde_json::to_value(summary).expect("summary serializes");
     if let Value::Object(o) = &mut j {
         o.remove("by_payment_method");
+        o.insert("business".into(), biz.name.clone().into());
+        o.insert("is_test_business".into(), biz.is_test.into());
         o.insert("generated_at".into(), chrono::Utc::now().to_rfc3339().into());
         o.insert("app_version".into(), env!("CARGO_PKG_VERSION").into());
         o.insert("schema_version".into(), schema_version.into());
@@ -354,7 +394,7 @@ fn write_all(
     let p = dir.join("summary.json");
     std::fs::write(&p, serde_json::to_string_pretty(&j).expect("json") + "\n").map_err(|e| fail(&p, e))?;
     let p = dir.join("README.txt");
-    std::fs::write(&p, readme(year, summary, f, rows.is_empty())).map_err(|e| fail(&p, e))?;
+    std::fs::write(&p, readme(year, biz, summary, f, rows.is_empty())).map_err(|e| fail(&p, e))?;
     Ok(vec![
         "transactions.csv",
         "expenses-by-category.csv",

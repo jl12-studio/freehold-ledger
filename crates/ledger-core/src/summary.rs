@@ -58,6 +58,7 @@ pub struct SummaryRequest {
     pub source: Option<String>,
     pub is_asset: Option<bool>,
     pub payment_method: Option<PaymentMethodFilter>,
+    pub business_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +122,7 @@ impl Ledger {
             source: r.source.clone(),
             is_asset: r.is_asset,
             payment_method: r.payment_method,
+            business_id: r.business_id,
             include_voided: true,
             ..Default::default()
         })?;

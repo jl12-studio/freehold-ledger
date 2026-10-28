@@ -83,6 +83,7 @@ fn req(pmf: Option<PaymentMethodFilter>) -> SummaryRequest {
         source: None,
         is_asset: None,
         payment_method: pmf,
+        business_id: None,
     }
 }
 

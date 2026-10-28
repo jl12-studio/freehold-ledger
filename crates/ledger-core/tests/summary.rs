@@ -10,7 +10,7 @@ fn today() -> NaiveDate {
 }
 fn req(p: Period) -> SummaryRequest {
     let (from, to) = ledger_core::resolve_period(p, today());
-    SummaryRequest { from, to, category: None, source: None, is_asset: None, payment_method: None }
+    SummaryRequest { from, to, category: None, source: None, is_asset: None, payment_method: None, business_id: None }
 }
 
 #[test]
@@ -108,6 +108,33 @@ fn period_resolution_boundaries() {
 #[test]
 fn invalid_range_rejected() {
     let (_d, l) = common::seeded();
-    let r = SummaryRequest { from: d("2026-02-01"), to: d("2026-01-01"), category: None, source: None, is_asset: None, payment_method: None };
+    let r = SummaryRequest { from: d("2026-02-01"), to: d("2026-01-01"), category: None, source: None, is_asset: None, payment_method: None, business_id: None };
     assert!(matches!(l.summarize(&r), Err(LedgerError::InvalidRange { .. })));
+}
+
+#[test]
+fn s_sum_6_summary_per_business() {
+    let (_d, mut l) = common::seeded();
+    l.create_business(ledger_core::NewBusiness { name: "Test shop".into(), note: None, is_test: true, make_current: false })
+        .unwrap();
+    l.record_expense_in(
+        Some(&ledger_core::BusinessKey::Id(2)),
+        ledger_core::NewExpense {
+            occurred_on: Some(d("2026-06-01")),
+            amount_cents: 1200,
+            description: "Shop thing".into(),
+            category: "supplies".into(),
+            is_asset: false,
+            payment_method: None,
+        },
+    )
+    .unwrap();
+    let mut r = req(Period::ThisYear);
+    r.business_id = Some(2);
+    let s = l.summarize(&r).unwrap();
+    assert_eq!(s.expenses_total_cents, 1200);
+    assert_eq!(s.income_total_cents, 0);
+    r.business_id = Some(1);
+    let s = l.summarize(&r).unwrap();
+    assert_eq!(s.expenses_total_cents, 68709);
 }

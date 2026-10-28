@@ -64,6 +64,7 @@ fn summary_2026(l: &ledger_core::Ledger) -> ledger_core::Summary {
             source: None,
             is_asset: None,
             payment_method: None,
+            business_id: None,
         })
         .unwrap()
 }

@@ -350,7 +350,7 @@ async fn ledger_info_and_categories_describe_the_books() {
 
     let info = ok_json(&call(&client, "ledger_info", json!({})).await);
     assert_eq!(info["transaction_count"], 0);
-    assert_eq!(info["schema_version"], 3);
+    assert_eq!(info["schema_version"], 4);
     assert!(info["path"].as_str().unwrap().ends_with("ledger.sqlite3"));
     assert!(info["note"].as_str().unwrap().contains("nothing is ever deleted"));
 
@@ -430,7 +430,7 @@ async fn export_tool_writes_folder() {
     let r = call(&client, "export_tax_year", json!({ "year": 2026, "destination": out.path() })).await;
     let v = ok_json(&r);
     let folder = std::path::PathBuf::from(v["folder"].as_str().unwrap());
-    assert_eq!(folder, out.path().join("Freehold Ledger 2026 export"));
+    assert_eq!(folder, out.path().join("Freehold Ledger My business 2026 export"));
     assert_eq!(v["files"].as_array().unwrap().len(), 7);
     assert!(folder.join("README.txt").is_file());
     assert_eq!(v["totals"]["expenses_total_cents"], 68709);

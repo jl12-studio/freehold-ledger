@@ -829,6 +829,7 @@ impl LedgerTools {
                 is_asset: i.is_asset,
                 batch_id: i.batch_id,
                 payment_method: pm_filter,
+                business_id: None,
                 include_voided: i.include_voided.unwrap_or(false),
                 limit: Some(limit),
             };
@@ -983,6 +984,7 @@ impl LedgerTools {
                 source: i.source,
                 is_asset: i.is_asset,
                 payment_method: pm_filter,
+                business_id: None,
             };
             let s = self.with_ledger(|l| Ok(l.summarize(&req)?))?;
             let mut v = serde_json::to_value(&s).expect("summary serializes");

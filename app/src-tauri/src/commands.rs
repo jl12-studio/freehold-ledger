@@ -101,6 +101,7 @@ impl FilterDto {
             is_asset: None,
             batch_id: None,
             payment_method,
+            business_id: None,
             include_voided: self.include_voided,
             limit: None,
         })

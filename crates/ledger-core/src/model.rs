@@ -91,6 +91,8 @@ pub struct Transaction {
     pub replaced_by_id: Option<i64>,
     /// The import batch this entry was recorded in, if any.
     pub batch_id: Option<i64>,
+    /// The business this entry belongs to.
+    pub business_id: i64,
     /// Current payment method: the latest assignment, if any.
     pub payment_method: Option<PaymentMethodRef>,
     pub recorded_at: String,
@@ -117,6 +119,8 @@ pub struct Filter {
     /// Only entries recorded in this import batch.
     pub batch_id: Option<i64>,
     pub payment_method: Option<PaymentMethodFilter>,
+    /// Only entries in this business; None means the whole file.
+    pub business_id: Option<i64>,
     pub include_voided: bool,
     pub limit: Option<u32>,
 }
@@ -238,6 +242,8 @@ pub struct PaymentMethod {
     pub retired_at: Option<String>,
     /// Live (not voided) transactions whose current payment method is this one.
     pub transaction_count: i64,
+    /// The business this method belongs to (D53).
+    pub business_id: i64,
 }
 
 /// What a transaction shows about its payment method.
@@ -270,4 +276,33 @@ pub struct Assignment {
     pub payment_method: PaymentMethodRef,
     pub assigned: Vec<Transaction>,
     pub unchanged_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum BusinessKey {
+    Id(i64),
+    Name(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct NewBusiness {
+    pub name: String,
+    pub note: Option<String>,
+    pub is_test: bool,
+    pub make_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Business {
+    pub id: i64,
+    pub name: String,
+    pub note: Option<String>,
+    pub is_test: bool,
+    pub archived: bool,
+    pub is_current: bool,
+    pub created_at: String,
+    pub archived_at: Option<String>,
+    /// Every transaction in the business, voided ones included.
+    pub transaction_count: i64,
 }

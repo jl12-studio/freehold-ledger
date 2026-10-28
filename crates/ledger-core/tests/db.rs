@@ -17,7 +17,7 @@ fn s_file_1_fresh_open_creates_owned_ledger() {
     let ledger = Ledger::open(&path).unwrap();
     assert!(path.exists());
     let info = ledger.info().unwrap();
-    assert_eq!(info.schema_version, 3);
+    assert_eq!(info.schema_version, 4);
     assert_eq!(info.transaction_count, 0);
     assert_eq!(ledger.path(), path.as_path());
 }
@@ -73,7 +73,7 @@ fn s_file_4_newer_schema_refused_and_untouched() {
     let before = std::fs::read(&path).unwrap();
     match Ledger::open(&path) {
         Err(LedgerError::NewerSchema { found, supported }) => {
-            assert_eq!((found, supported), (99, 3));
+            assert_eq!((found, supported), (99, 4));
         }
         other => panic!("expected NewerSchema, got {:?}", other.map(|_| ())),
     }
@@ -169,8 +169,12 @@ fn s_file_5_schema_1_file_upgrades() {
     }
     let mut l = Ledger::open(&path).unwrap();
     let info = l.info().unwrap();
-    assert_eq!(info.schema_version, 3);
+    assert_eq!(info.schema_version, 4);
     assert_eq!(info.transaction_count, 1);
+    let bs = l.businesses(true).unwrap();
+    assert_eq!(bs.len(), 1);
+    assert_eq!((bs[0].id, bs[0].name.as_str(), bs[0].transaction_count), (1, "My business", 1));
+    assert_eq!(info.current_business_id, Some(1));
     let r = l
         .record_batch(ledger_core::NewBatch {
             label: "after upgrade".into(),
@@ -233,8 +237,12 @@ fn s_file_6_schema_2_file_upgrades() {
     }
     let mut l = Ledger::open(&path).unwrap();
     let info = l.info().unwrap();
-    assert_eq!(info.schema_version, 3);
+    assert_eq!(info.schema_version, 4);
     assert_eq!(info.transaction_count, 1);
+    let bs = l.businesses(true).unwrap();
+    assert_eq!(bs.len(), 1);
+    assert_eq!((bs[0].id, bs[0].name.as_str(), bs[0].transaction_count), (1, "My business", 1));
+    assert_eq!(info.current_business_id, Some(1));
     let p = l
         .create_payment_method(ledger_core::NewPaymentMethod {
             kind: ledger_core::PaymentKind::Cash,
@@ -327,4 +335,166 @@ fn raw_write(l: &Ledger) {
     let c = raw(l.path());
     c.busy_timeout(std::time::Duration::from_millis(5000)).unwrap();
     c.execute(INSERT_TX, []).unwrap();
+}
+
+fn count(c: &Connection, sql: &str) -> i64 {
+    c.query_row(sql, [], |r| r.get(0)).unwrap()
+}
+
+/// A hand-built schema 3 file: 3 transactions (2 voided, 3 replaces 2), a batch holding 1 and 3,
+/// two payment methods, the default set to method 1 then 2, and one assignment.
+fn v3_fixture(path: &Path, last_default_null: bool) {
+    let c = raw(path);
+    c.execute_batch(include_str!("../migrations/0001_init.sql")).unwrap();
+    c.execute_batch(include_str!("../migrations/0002_batches.sql")).unwrap();
+    c.execute_batch(include_str!("../migrations/0003_payment_methods.sql")).unwrap();
+    c.execute("INSERT INTO schema_meta (key, value) VALUES ('schema_version','3')", []).unwrap();
+    c.execute(INSERT_TX, []).unwrap();
+    c.execute(INSERT_TX, []).unwrap();
+    c.execute(
+        "INSERT INTO transactions (kind, occurred_on, amount_cents, description, category, replaces_id, recorded_at) \
+         VALUES ('expense', '2026-01-02', 30000, 'device', 'supplies', 2, '2026-01-02T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    c.execute("INSERT INTO voids (transaction_id, reason, recorded_at) VALUES (2, 'wrong', '2026-01-03T00:00:00Z')", []).unwrap();
+    c.execute("INSERT INTO batches (label, recorded_at) VALUES ('f.csv', '2026-01-03T00:00:00Z')", []).unwrap();
+    c.execute("INSERT INTO transaction_batches (transaction_id, batch_id) VALUES (1, 1)", []).unwrap();
+    c.execute("INSERT INTO transaction_batches (transaction_id, batch_id) VALUES (3, 1)", []).unwrap();
+    c.execute("INSERT INTO payment_methods (kind, nickname, last4, created_at) VALUES ('card','Visa','4242','x')", []).unwrap();
+    c.execute("INSERT INTO payment_methods (kind, nickname, created_at) VALUES ('cash','Cash','x')", []).unwrap();
+    c.execute("INSERT INTO default_payment_method_changes (payment_method_id, recorded_at) VALUES (1,'2026-02-01T00:00:00Z')", []).unwrap();
+    let last = if last_default_null { "NULL" } else { "2" };
+    c.execute(
+        &format!("INSERT INTO default_payment_method_changes (payment_method_id, recorded_at) VALUES ({last},'2026-02-02T00:00:00Z')"),
+        [],
+    )
+    .unwrap();
+    c.execute("INSERT INTO payment_method_assignments (transaction_id, payment_method_id, recorded_at) VALUES (1,1,'x')", []).unwrap();
+}
+
+#[test]
+fn s_mig_1_v3_file_moves_into_my_business() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    v3_fixture(&path, false);
+    let l = Ledger::open(&path).unwrap();
+    let info = l.info().unwrap();
+    assert_eq!(info.schema_version, 4);
+    assert_eq!(info.transaction_count, 3);
+    assert_eq!(info.current_business_id, Some(1));
+    let bs = l.businesses(true).unwrap();
+    assert_eq!(bs.len(), 1);
+    let b = &bs[0];
+    assert_eq!((b.id, b.name.as_str()), (1, "My business"));
+    assert!(b.is_current && !b.is_test && !b.archived);
+    assert_eq!(b.transaction_count, 3);
+    let c = raw(&path);
+    assert_eq!(count(&c, "SELECT count(*) FROM transaction_businesses WHERE business_id = 1"), 3);
+    assert_eq!(count(&c, "SELECT count(*) FROM transaction_businesses"), 3);
+    assert_eq!(count(&c, "SELECT count(*) FROM batch_businesses WHERE batch_id = 1 AND business_id = 1"), 1);
+    assert_eq!(count(&c, "SELECT count(*) FROM payment_method_businesses WHERE business_id = 1"), 2);
+    assert_eq!(count(&c, "SELECT count(*) FROM business_default_payment_method_changes"), 1);
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM business_default_payment_method_changes WHERE business_id = 1 AND payment_method_id = 2"),
+        1
+    );
+    assert_eq!(count(&c, "SELECT count(*) FROM voids WHERE transaction_id = 2"), 1);
+    assert_eq!(count(&c, "SELECT replaces_id FROM transactions WHERE id = 3"), 2);
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM payment_method_assignments WHERE transaction_id = 1 AND payment_method_id = 1"),
+        1
+    );
+    assert_eq!(count(&c, "SELECT count(*) FROM default_payment_method_changes"), 2);
+}
+
+#[test]
+fn s_mig_2_v3_null_default_stays_none() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    v3_fixture(&path, true);
+    drop(Ledger::open(&path).unwrap());
+    let c = raw(&path);
+    assert_eq!(count(&c, "SELECT count(*) FROM business_default_payment_method_changes"), 1);
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM business_default_payment_method_changes WHERE business_id = 1 AND payment_method_id IS NULL"),
+        1
+    );
+}
+
+#[test]
+fn s_mig_3_fresh_file_has_my_business_current() {
+    let dir = TempDir::new().unwrap();
+    let l = Ledger::open(&dir.path().join("ledger.sqlite3")).unwrap();
+    let bs = l.businesses(true).unwrap();
+    assert_eq!(bs.len(), 1);
+    assert_eq!((bs[0].id, bs[0].name.as_str()), (1, "My business"));
+    assert_eq!(l.info().unwrap().current_business_id, Some(1));
+}
+
+#[test]
+fn s_imm_5_business_tables_are_append_only() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    drop(Ledger::open(&path).unwrap());
+    let c = raw(&path);
+    c.execute(INSERT_TX, []).unwrap();
+    c.execute("INSERT INTO batches (label, recorded_at) VALUES ('f.csv', 'x')", []).unwrap();
+    c.execute("INSERT INTO payment_methods (kind, nickname, created_at) VALUES ('cash','Cash','x')", []).unwrap();
+    c.execute("INSERT INTO business_changes (business_id, action, name, recorded_at) VALUES (1,'rename','Biz','x')", []).unwrap();
+    c.execute("INSERT INTO transaction_businesses (transaction_id, business_id) VALUES (1,1)", []).unwrap();
+    c.execute("INSERT INTO batch_businesses (batch_id, business_id) VALUES (1,1)", []).unwrap();
+    c.execute("INSERT INTO payment_method_businesses (payment_method_id, business_id) VALUES (1,1)", []).unwrap();
+    for (table, set, replace) in [
+        (
+            "businesses",
+            "name='x'",
+            "INSERT OR REPLACE INTO businesses (id, name, is_test, created_at) VALUES (1,'x',0,'x')",
+        ),
+        (
+            "business_changes",
+            "name='x'",
+            "INSERT OR REPLACE INTO business_changes (id, business_id, action, name, recorded_at) VALUES (1,1,'rename','x','x')",
+        ),
+        (
+            "current_business_changes",
+            "business_id=NULL",
+            "INSERT OR REPLACE INTO current_business_changes (id, business_id, recorded_at) VALUES (1,NULL,'x')",
+        ),
+        (
+            "transaction_businesses",
+            "business_id=2",
+            "INSERT OR REPLACE INTO transaction_businesses (transaction_id, business_id) VALUES (1,1)",
+        ),
+        (
+            "batch_businesses",
+            "business_id=2",
+            "INSERT OR REPLACE INTO batch_businesses (batch_id, business_id) VALUES (1,1)",
+        ),
+        (
+            "payment_method_businesses",
+            "business_id=2",
+            "INSERT OR REPLACE INTO payment_method_businesses (payment_method_id, business_id) VALUES (1,1)",
+        ),
+        (
+            "business_default_payment_method_changes",
+            "payment_method_id=NULL",
+            "INSERT OR REPLACE INTO business_default_payment_method_changes (id, business_id, payment_method_id, recorded_at) VALUES (1,1,NULL,'x')",
+        ),
+    ] {
+        if table == "business_default_payment_method_changes" {
+            c.execute("INSERT INTO business_default_payment_method_changes (business_id, payment_method_id, recorded_at) VALUES (1,1,'x')", []).unwrap();
+        }
+        let expected = format!("{table} are append-only");
+        let e = c.execute(&format!("UPDATE {table} SET {set}"), []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+        let e = c.execute(&format!("DELETE FROM {table}"), []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+        let e = c.execute(replace, []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+    }
+    let e = c
+        .execute("INSERT INTO businesses (name, created_at) VALUES ('Shop 1234567890123','x')", [])
+        .unwrap_err();
+    assert!(e.to_string().contains("CHECK"), "{e}");
 }

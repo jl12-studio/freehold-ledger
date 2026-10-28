@@ -67,6 +67,7 @@ fn insert(
     tx: &rusqlite::Transaction,
     row: &Row,
     replaces_id: Option<i64>,
+    business_id: i64,
 ) -> Result<i64> {
     let source_id: Option<i64> = match &row.source {
         Some(name) => {
@@ -94,6 +95,10 @@ fn insert(
         ],
     )?;
     let id = tx.last_insert_rowid();
+    tx.execute(
+        "INSERT INTO transaction_businesses (transaction_id, business_id) VALUES (?1, ?2)",
+        rusqlite::params![id, business_id],
+    )?;
     if let Some(pm) = row.payment_method_id {
         tx.execute(
             "INSERT INTO payment_method_assignments (transaction_id, payment_method_id, recorded_at) VALUES (?1, ?2, ?3)",
@@ -107,13 +112,14 @@ const BASE: &str = "SELECT t.id, t.kind, t.occurred_on, t.amount_cents, t.descri
     COALESCE((SELECT c.category FROM classification_changes c WHERE c.transaction_id = t.id ORDER BY c.id DESC LIMIT 1), t.category) AS eff, \
     t.is_asset, s.name AS src, t.replaces_id, \
     (SELECT r.id FROM transactions r WHERE r.replaces_id = t.id ORDER BY r.id LIMIT 1) AS replaced_by, \
-    tb.batch_id, \
+    tb.batch_id, xb.business_id, \
     (SELECT a.payment_method_id FROM payment_method_assignments a WHERE a.transaction_id = t.id ORDER BY a.id DESC LIMIT 1) AS pm_id, \
     t.recorded_at, v.reason, v.recorded_at AS void_at \
     FROM transactions t \
     LEFT JOIN income_sources s ON s.id = t.income_source_id \
     LEFT JOIN voids v ON v.transaction_id = t.id \
-    LEFT JOIN transaction_batches tb ON tb.transaction_id = t.id";
+    LEFT JOIN transaction_batches tb ON tb.transaction_id = t.id \
+    LEFT JOIN transaction_businesses xb ON xb.transaction_id = t.id";
 
 fn map_row(conn: &Connection, r: &rusqlite::Row) -> Result<Transaction> {
     let id: i64 = r.get("id")?;
@@ -158,6 +164,7 @@ fn map_row(conn: &Connection, r: &rusqlite::Row) -> Result<Transaction> {
         replaces_id: r.get("replaces_id")?,
         replaced_by_id: r.get("replaced_by")?,
         batch_id: r.get("batch_id")?,
+        business_id: r.get("business_id")?,
         payment_method,
         recorded_at: r.get("recorded_at")?,
         void,
@@ -211,33 +218,48 @@ fn income_row(i: NewIncome) -> Result<Row> {
 
 impl Ledger {
     pub fn record_expense(&mut self, e: NewExpense) -> Result<Transaction> {
+        self.record_expense_in(None, e)
+    }
+
+    pub fn record_expense_in(&mut self, business: Option<&BusinessKey>, e: NewExpense) -> Result<Transaction> {
         let key = e.payment_method.clone();
         let mut row = expense_row(e)?;
         let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let biz = crate::businesses::resolve_in(&tx, business)?;
         row.payment_method_id = match &key {
-            Some(k) => Some(active_in(&tx, k)?.id),
-            None => default_in(&tx)?.map(|p| p.id),
+            Some(k) => Some(active_in(&tx, k, biz.id)?.id),
+            None => default_in(&tx, biz.id)?.map(|p| p.id),
         };
-        let id = insert(&tx, &row, None)?;
+        let id = insert(&tx, &row, None, biz.id)?;
         tx.commit()?;
         load(self.conn(), id)
     }
 
     pub fn record_income(&mut self, i: NewIncome) -> Result<Transaction> {
+        self.record_income_in(None, i)
+    }
+
+    pub fn record_income_in(&mut self, business: Option<&BusinessKey>, i: NewIncome) -> Result<Transaction> {
         let key = i.payment_method.clone();
         let mut row = income_row(i)?;
         let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let biz = crate::businesses::resolve_in(&tx, business)?;
         row.payment_method_id = match &key {
-            Some(k) => Some(active_in(&tx, k)?.id),
+            Some(k) => Some(active_in(&tx, k, biz.id)?.id),
             None => None,
         };
-        let id = insert(&tx, &row, None)?;
+        let id = insert(&tx, &row, None, biz.id)?;
         tx.commit()?;
         load(self.conn(), id)
     }
 
     /// Records up to `MAX_BATCH` entries all or nothing, skipping entries that match a live one.
     pub fn record_batch(&mut self, b: NewBatch) -> Result<BatchResult> {
+        self.record_batch_in(None, b)
+    }
+
+    /// Like `record_batch`, inside the named business (else the current one); duplicates are judged inside it.
+    pub fn record_batch_in(&mut self, business: Option<&BusinessKey>, b: NewBatch) -> Result<BatchResult> {
         let label = check_text(&b.label, LedgerError::MissingBatchLabel)?;
         if b.entries.is_empty() {
             return Err(LedgerError::EmptyBatch);
@@ -258,12 +280,13 @@ impl Ledger {
             rows.push((row, be.allow_duplicate));
         }
         let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let batch_pm = batch_key.as_ref().map(|k| active_in(&tx, k)).transpose()?;
-        let fallback = default_in(&tx)?;
+        let biz = crate::businesses::resolve_in(&tx, business)?;
+        let batch_pm = batch_key.as_ref().map(|k| active_in(&tx, k, biz.id)).transpose()?;
+        let fallback = default_in(&tx, biz.id)?;
         for (i, (row, _)) in rows.iter_mut().enumerate() {
             row.payment_method_id = match &keys[i] {
                 Some(k) => Some(
-                    active_in(&tx, k)
+                    active_in(&tx, k, biz.id)
                         .map_err(|e| LedgerError::BatchEntry { index: i + 1, reason: Box::new(e) })?
                         .id,
                 ),
@@ -282,12 +305,15 @@ impl Ledger {
                     .query_row(
                         "SELECT t.id FROM transactions t LEFT JOIN voids v ON v.transaction_id = t.id \
                          WHERE v.id IS NULL AND t.kind = ?1 AND t.occurred_on = ?2 AND t.amount_cents = ?3 \
-                         AND t.description = ?4 COLLATE NOCASE ORDER BY t.id LIMIT 1",
+                         AND t.description = ?4 COLLATE NOCASE \
+                         AND EXISTS (SELECT 1 FROM transaction_businesses xb2 WHERE xb2.transaction_id = t.id AND xb2.business_id = ?5) \
+                         ORDER BY t.id LIMIT 1",
                         rusqlite::params![
                             row.kind.as_str(),
                             row.occurred_on.format("%Y-%m-%d").to_string(),
                             row.amount_cents,
-                            row.description
+                            row.description,
+                            biz.id
                         ],
                         |r| r.get(0),
                     )
@@ -297,13 +323,17 @@ impl Ledger {
                     continue;
                 }
             }
-            inserted.push((i + 1, insert(&tx, row, None)?));
+            inserted.push((i + 1, insert(&tx, row, None, biz.id)?));
         }
         let batch_id = if inserted.is_empty() {
             None
         } else {
             tx.execute("INSERT INTO batches (label, recorded_at) VALUES (?1, ?2)", rusqlite::params![label, now()])?;
             let bid = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT INTO batch_businesses (batch_id, business_id) VALUES (?1, ?2)",
+                rusqlite::params![bid, biz.id],
+            )?;
             for (_, id) in &inserted {
                 tx.execute(
                     "INSERT INTO transaction_batches (transaction_id, batch_id) VALUES (?1, ?2)",
@@ -387,6 +417,10 @@ impl Ledger {
         if orig.void.is_some() {
             return Err(LedgerError::Voided(id));
         }
+        let orig_biz = crate::businesses::find_in(&tx, &BusinessKey::Id(orig.business_id))?;
+        if orig_biz.archived {
+            return Err(LedgerError::ArchivedBusiness(orig_biz.name));
+        }
         let amount_cents = r.amount_cents.unwrap_or(orig.amount_cents);
         check_amount(amount_cents)?;
         let description = check_text(
@@ -411,12 +445,12 @@ impl Ledger {
             is_asset: orig.kind == Kind::Expense && r.is_asset.unwrap_or(orig.is_asset),
             source,
             payment_method_id: match &r.payment_method {
-                Some(k) => Some(active_in(&tx, k)?.id),
+                Some(k) => Some(active_in(&tx, k, orig.business_id)?.id),
                 None => orig.payment_method.as_ref().map(|p| p.id),
             },
         };
         insert_void(&tx, id, &reason)?;
-        let new_id = insert(&tx, &row, Some(id))?;
+        let new_id = insert(&tx, &row, Some(id), orig.business_id)?;
         tx.execute(
             "INSERT INTO transaction_batches (transaction_id, batch_id) \
              SELECT ?1, batch_id FROM transaction_batches WHERE transaction_id = ?2",
@@ -428,6 +462,16 @@ impl Ledger {
 
     /// Sets the current payment method of 1 to `MAX_ASSIGN` transactions, all or nothing.
     pub fn assign_payment_method(&mut self, key: &PaymentMethodKey, ids: &[i64]) -> Result<Assignment> {
+        self.assign_payment_method_in(None, key, ids)
+    }
+
+    /// Like `assign_payment_method`, inside the named business (else the current one); an entry of another business is refused before anything is written.
+    pub fn assign_payment_method_in(
+        &mut self,
+        business: Option<&BusinessKey>,
+        key: &PaymentMethodKey,
+        ids: &[i64],
+    ) -> Result<Assignment> {
         if ids.is_empty() {
             return Err(LedgerError::NoIdsGiven);
         }
@@ -441,7 +485,15 @@ impl Ledger {
             return Err(LedgerError::TooManyIds { count: uniq.len() });
         }
         let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let pm = active_in(&tx, key)?;
+        let biz = crate::businesses::resolve_in(&tx, business)?;
+        let pm = active_in(&tx, key, biz.id)?;
+        for id in &uniq {
+            let t = load(&tx, *id)?;
+            if t.business_id != biz.id {
+                let name = crate::businesses::find_in(&tx, &BusinessKey::Id(t.business_id))?.name;
+                return Err(LedgerError::TransactionInOtherBusiness { id: *id, business: name });
+            }
+        }
         let mut assigned_ids = Vec::new();
         let mut unchanged_ids = Vec::new();
         for id in uniq {
@@ -496,6 +548,9 @@ impl Ledger {
         if let Some(b) = f.batch_id {
             add("batch_id = ?", b.to_string());
         }
+        if let Some(b) = f.business_id {
+            add("business_id = CAST(? AS INTEGER)", b.to_string());
+        }
         match f.payment_method {
             Some(PaymentMethodFilter::Id(id)) => add("pm_id = CAST(? AS INTEGER)", id.to_string()),
             Some(PaymentMethodFilter::Unassigned) => wh.push("pm_id IS NULL".to_string()),
@@ -520,6 +575,16 @@ impl Ledger {
             out.push(map_row(conn, r)?);
         }
         Ok(out)
+    }
+
+    pub fn income_sources_in(&self, business_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT DISTINCT s.name FROM income_sources s JOIN transactions t ON t.income_source_id = s.id \
+             JOIN transaction_businesses xb ON xb.transaction_id = t.id WHERE xb.business_id = ?1 \
+             ORDER BY s.name COLLATE NOCASE",
+        )?;
+        let v = stmt.query_map([business_id], |r| r.get(0))?.collect::<std::result::Result<Vec<String>, _>>()?;
+        Ok(v)
     }
 
     pub fn income_sources(&self) -> Result<Vec<String>> {

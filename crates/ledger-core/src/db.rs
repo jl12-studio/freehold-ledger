@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub const SUPPORTED_SCHEMA: u32 = 3;
+pub const SUPPORTED_SCHEMA: u32 = 4;
 
 pub fn default_db_path() -> PathBuf {
     dirs::data_dir()
@@ -27,6 +27,8 @@ pub struct LedgerInfo {
     pub path: String,
     pub schema_version: u32,
     pub transaction_count: i64,
+    /// The agent's current business: the latest `current_business_changes` row, if any.
+    pub current_business_id: Option<i64>,
 }
 
 pub struct Ledger {
@@ -109,10 +111,20 @@ impl Ledger {
         };
         let transaction_count =
             self.conn.query_row("SELECT count(*) FROM transactions", [], |r| r.get(0))?;
+        let current_business_id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT business_id FROM current_business_changes ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
         Ok(LedgerInfo {
             path: self.path.display().to_string(),
             schema_version,
             transaction_count,
+            current_business_id,
         })
     }
 

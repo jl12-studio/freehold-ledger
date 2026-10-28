@@ -29,7 +29,7 @@ fn s_exp_1_seed_2026_export_matches_summarize() {
     let out = tempfile::tempdir().unwrap();
     let r = l.export_tax_year(2026, Some(out.path())).unwrap();
 
-    assert_eq!(r.folder, out.path().join("Freehold Ledger 2026 export"));
+    assert_eq!(r.folder, out.path().join("Freehold Ledger My business 2026 export"));
     let mut files = r.files.clone();
     files.sort();
     assert_eq!(
@@ -59,7 +59,7 @@ fn s_exp_1_seed_2026_export_matches_summarize() {
     assert!(rows.iter().all(|r| r[col(&h, "date")].starts_with("2026-")));
 
     let s = l
-        .summarize(&SummaryRequest { from: d("2026-01-01"), to: d("2026-12-31"), category: None, source: None, is_asset: None, payment_method: None })
+        .summarize(&SummaryRequest { from: d("2026-01-01"), to: d("2026-12-31"), category: None, source: None, is_asset: None, payment_method: None, business_id: None })
         .unwrap();
 
     let (h, rows) = read_csv(&r.folder.join("expenses-by-category.csv"));
@@ -100,6 +100,8 @@ fn s_exp_1_seed_2026_export_matches_summarize() {
     for k in ["generated_at", "app_version", "schema_version"] {
         assert!(o.remove(k).is_some(), "{k} missing");
     }
+    assert_eq!(o.remove("business"), Some(Value::from("My business")));
+    assert_eq!(o.remove("is_test_business"), Some(Value::from(false)));
     assert!(o.get("by_payment_method").is_none());
     let mut expected = serde_json::to_value(&s).unwrap();
     expected.as_object_mut().unwrap().remove("by_payment_method");
@@ -154,9 +156,9 @@ fn s_exp_4_second_export_gets_numbered_folder() {
     let marker = first.folder.join("transactions.csv");
     let before = std::fs::read(&marker).unwrap();
     let second = l.export_tax_year(2026, Some(out.path())).unwrap();
-    assert_eq!(second.folder, out.path().join("Freehold Ledger 2026 export (2)"));
+    assert_eq!(second.folder, out.path().join("Freehold Ledger My business 2026 export (2)"));
     let third = l.export_tax_year(2026, Some(out.path())).unwrap();
-    assert_eq!(third.folder, out.path().join("Freehold Ledger 2026 export (3)"));
+    assert_eq!(third.folder, out.path().join("Freehold Ledger My business 2026 export (3)"));
     assert_eq!(std::fs::read(&marker).unwrap(), before);
 }
 
@@ -227,4 +229,82 @@ fn s_exp_5_transactions_csv_names_the_payment_method() {
     let j: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(r.folder.join("summary.json")).unwrap()).unwrap();
     assert!(j.get("by_payment_method").is_none());
+}
+
+fn test_shop_with_expense(l: &mut ledger_core::Ledger) {
+    l.create_business(ledger_core::NewBusiness { name: "Test shop".into(), note: None, is_test: true, make_current: false })
+        .unwrap();
+    l.record_expense_in(
+        Some(&ledger_core::BusinessKey::Name("test shop".into())),
+        NewExpense {
+            occurred_on: Some(d("2026-06-01")),
+            amount_cents: 1200,
+            description: "Shop thing".into(),
+            category: "supplies".into(),
+            is_asset: false,
+            payment_method: None,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn s_exp_7_export_names_the_business() {
+    let (_d, mut l) = common::seeded();
+    test_shop_with_expense(&mut l);
+    let out = tempfile::tempdir().unwrap();
+    let r = l.export_tax_year(2026, Some(out.path())).unwrap();
+    assert_eq!(r.folder, out.path().join("Freehold Ledger My business 2026 export"));
+    assert_eq!(r.business.name, "My business");
+    let (h, rows) = read_csv(&r.folder.join("transactions.csv"));
+    assert_eq!(rows.len(), 9);
+    assert!(rows.iter().all(|row| row[col(&h, "description")] != "Shop thing"));
+    let readme = std::fs::read_to_string(r.folder.join("README.txt")).unwrap();
+    assert!(readme.contains("Business: My business."));
+    assert!(!readme.contains("This is a test business"));
+}
+
+#[test]
+fn s_exp_8_test_business_export_says_test() {
+    let (_d, mut l) = common::seeded();
+    test_shop_with_expense(&mut l);
+    let out = tempfile::tempdir().unwrap();
+    let key = ledger_core::BusinessKey::Name("test shop".into());
+    let r = l.export_tax_year_in(2026, Some(&key), Some(out.path())).unwrap();
+    assert_eq!(r.folder, out.path().join("Freehold Ledger Test shop (test) 2026 export"));
+    let (_h, rows) = read_csv(&r.folder.join("transactions.csv"));
+    assert_eq!(rows.len(), 1);
+    let j: Value = serde_json::from_str(&std::fs::read_to_string(r.folder.join("summary.json")).unwrap()).unwrap();
+    assert_eq!(j["business"], "Test shop");
+    assert_eq!(j["is_test_business"], true);
+    assert_eq!(j["expenses_total_cents"], 1200);
+    let readme = std::fs::read_to_string(r.folder.join("README.txt")).unwrap();
+    assert!(readme.contains("Business: Test shop."));
+    assert!(readme.contains(
+        "This is a test business: its entries are for trying things out and are not real books."
+    ));
+    assert!(!readme.contains('\u{2014}'));
+}
+
+#[test]
+fn s_exp_9_unsafe_name_is_made_folder_safe() {
+    let (_d, mut l) = common::seeded();
+    let out = tempfile::tempdir().unwrap();
+    let key = ledger_core::BusinessKey::Id(1);
+    l.rename_business(&key, "A/B: \"C\"?").unwrap();
+    let r = l.export_tax_year(2026, Some(out.path())).unwrap();
+    assert_eq!(r.folder, out.path().join("Freehold Ledger A-B- -C-- 2026 export"));
+    l.rename_business(&key, "...").unwrap();
+    let r = l.export_tax_year(2026, Some(out.path())).unwrap();
+    assert_eq!(r.folder, out.path().join("Freehold Ledger Business 2026 export"));
+}
+
+#[test]
+fn s_exp_10_no_current_business_writes_nothing() {
+    let (_d, mut l) = common::seeded();
+    l.archive_business(&ledger_core::BusinessKey::Id(1)).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("exports");
+    assert!(matches!(l.export_tax_year(2026, Some(&dest)), Err(LedgerError::NoCurrentBusiness)));
+    assert!(!dest.exists() || std::fs::read_dir(&dest).unwrap().next().is_none());
 }
