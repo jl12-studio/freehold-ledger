@@ -133,6 +133,56 @@ pub fn list_income_sources(state: State<'_, AppState>) -> Result<Vec<String>, Ap
     with_ledger(&state, |l| l.income_sources())
 }
 
+/// Current calendar year (UTC), from the system clock.
+fn current_year() -> i32 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    // Civil-from-days (Howard Hinnant); only the year is needed.
+    let z = secs.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let year = yoe + era * 400 + i64::from(mp >= 10);
+    year as i32
+}
+
+/// Distinct years with any entry (voided included), newest first; the current year is always present.
+#[tauri::command]
+pub fn ledger_years(state: State<'_, AppState>) -> Result<Vec<i32>, AppError> {
+    let f = FilterDto { include_voided: true, ..Default::default() }
+        .to_filter()
+        .map_err(|e| AppError::from_ledger(&e, &state.path))?;
+    let rows = with_ledger(&state, |l| l.list(&f))?;
+    let mut years: Vec<i32> = rows
+        .iter()
+        .filter_map(|t| t.occurred_on.to_string().get(..4)?.parse().ok())
+        .collect();
+    years.push(current_year());
+    years.sort_unstable_by(|a, b| b.cmp(a));
+    years.dedup();
+    Ok(years)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportResultDto {
+    pub folder: String,
+    pub files: Vec<String>,
+}
+
+/// Writes the year's export to the default folder; nothing is written on failure.
+#[tauri::command]
+pub fn export_tax_year(
+    state: State<'_, AppState>,
+    year: i32,
+) -> Result<ExportResultDto, AppError> {
+    let r = with_ledger(&state, |l| l.export_tax_year(year, None))?;
+    Ok(ExportResultDto { folder: r.folder.display().to_string(), files: r.files })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

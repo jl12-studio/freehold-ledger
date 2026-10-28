@@ -119,7 +119,11 @@ onBeforeUnmount(() => clearTimeout(loadingTimer));
 </script>
 
 <template>
-  <AppHeader :path="path" @reveal="reveal" />
+  <AppHeader
+    :path="path"
+    :show-export="state === 'ready' || state === 'empty'"
+    @reveal="reveal"
+  />
   <main>
     <p v-if="state === 'loading' && showLoading" class="max-w-measure mx-auto px-6 pt-16 text-ui text-muted">
       Opening your ledger…

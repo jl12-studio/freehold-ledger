@@ -34,4 +34,6 @@ pub enum LedgerError {
     Voided(i64),
     #[error("The start date {from} is after the end date {to}. Put the earlier date first.")]
     InvalidRange { from: NaiveDate, to: NaiveDate },
+    #[error("Could not write the export to {}: {reason}. Nothing was created.", .path.display())]
+    ExportFailed { path: PathBuf, reason: String },
 }

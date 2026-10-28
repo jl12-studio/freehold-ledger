@@ -10,6 +10,7 @@ name = "ledger_core"
 
 [dependencies]
 chrono = { version = "0.4.45", features = ["serde"] }
+csv = "1.4.0"
 dirs = "7.0.0"
 rusqlite = { version = "0.41.0", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

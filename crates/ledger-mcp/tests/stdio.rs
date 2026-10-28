@@ -52,8 +52,9 @@ fn ok_json(r: &CallToolResult) -> Value {
     serde_json::from_str(&text(r)).expect("success content is JSON text")
 }
 
-const NINE_TOOLS: [&str; 9] = [
+const TEN_TOOLS: [&str; 10] = [
     "correct_transaction",
+    "export_tax_year",
     "ledger_info",
     "list_categories",
     "list_transactions",
@@ -65,14 +66,14 @@ const NINE_TOOLS: [&str; 9] = [
 ];
 
 #[tokio::test]
-async fn s_mcp_1_lists_nine_tools_with_descriptions() {
+async fn s_mcp_1_lists_ten_tools_with_descriptions() {
     let dir = tempfile::tempdir().unwrap();
     let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
 
     let tools = client.list_all_tools().await.unwrap();
     let mut names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
     names.sort();
-    assert_eq!(names, NINE_TOOLS);
+    assert_eq!(names, TEN_TOOLS);
 
     for t in &tools {
         let desc = t.description.as_deref().unwrap_or("");
@@ -403,5 +404,32 @@ async fn summarize_requires_period_or_range() {
     assert!(is_error(&r));
     let r = call(&client, "summarize", json!({ "period": "next_decade" })).await;
     assert!(is_error(&r));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn export_tool_writes_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    let r = call(&client, "export_tax_year", json!({ "year": 2026, "destination": out.path() })).await;
+    let v = ok_json(&r);
+    let folder = std::path::PathBuf::from(v["folder"].as_str().unwrap());
+    assert_eq!(folder, out.path().join("Freehold Ledger 2026 export"));
+    assert_eq!(v["files"].as_array().unwrap().len(), 7);
+    assert!(folder.join("README.txt").is_file());
+    assert_eq!(v["totals"]["expenses_total_cents"], 68709);
+    let note = v["note"].as_str().unwrap();
+    assert!(note.contains("Your 2026 books are in") && note.contains("README.txt"), "{note}");
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn export_tool_rejects_relative_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&seeded_db(dir.path())).await;
+    let r = call(&client, "export_tax_year", json!({ "year": 2026, "destination": "exports/here" })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("full folder path"), "{}", text(&r));
     client.cancel().await.ok();
 }

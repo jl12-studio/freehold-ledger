@@ -327,6 +327,15 @@ fn add_dollars(v: &mut Value) {
     }
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ExportInput {
+    /// The calendar year to export, for example 2026.
+    year: i32,
+    /// Absolute path of the folder to create the export inside. Omit for Documents/Freehold Ledger/exports.
+    destination: Option<String>,
+}
+
 fn with_note(mut v: Value, note: impl Into<String>) -> Value {
     v["note"] = Value::String(note.into());
     v
@@ -565,6 +574,42 @@ impl LedgerTools {
                 );
             }
             Ok(with_note(v, note))
+        })())
+    }
+
+    #[tool(
+        description = "Write a tax-year export folder for a preparer or another AI: categorized expenses on Schedule C lines, income by source, assets, the full correction trail, and a summary. Use for 'export my books', 'get my taxes ready'.",
+        input_schema = schema_for_input::<ExportInput>().expect("schema")
+    )]
+    fn export_tax_year(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: ExportInput = parse_args(args)?;
+            let dest = match i.destination.as_deref().map(str::trim) {
+                Some("") | None => None,
+                Some(d) => {
+                    let p = std::path::PathBuf::from(d);
+                    if !p.is_absolute() {
+                        return Err(ToolError::Input(format!(
+                            "destination must be a full folder path starting from the root, for example /Users/you/Documents; \"{d}\" is relative. Omit it to use the default exports folder."
+                        )));
+                    }
+                    Some(p)
+                }
+            };
+            let r = self.with_ledger(|l| Ok(l.export_tax_year(i.year, dest.as_deref())?))?;
+            let folder = r.folder.display().to_string();
+            let note = format!(
+                "Your {} books are in {folder}. Hand the whole folder to your preparer; README.txt explains every file.",
+                i.year
+            );
+            Ok(with_note(
+                json!({
+                    "folder": folder,
+                    "files": r.files,
+                    "totals": serde_json::to_value(&r.summary).expect("summary serializes"),
+                }),
+                note,
+            ))
         })())
     }
 }

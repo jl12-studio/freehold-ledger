@@ -2,6 +2,7 @@
 mod categories;
 mod db;
 mod error;
+mod export;
 mod migrations;
 mod model;
 mod ops;
@@ -15,6 +16,7 @@ pub use model::{
     ClassificationChange, Correction, Filter, Kind, NewExpense, NewIncome, Replacement, Transaction,
     VoidInfo,
 };
+pub use export::ExportResult;
 pub use ops::parse_date;
 pub use seed::seed_demo;
 pub use summary::{resolve_period, CategoryTotal, Period, SourceTotal, Summary, SummaryRequest, Totals};

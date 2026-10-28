@@ -35,7 +35,9 @@ pub fn run() {
             commands::ledger_info,
             commands::list_transactions,
             commands::list_categories,
-            commands::list_income_sources
+            commands::list_income_sources,
+            commands::ledger_years,
+            commands::export_tax_year
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

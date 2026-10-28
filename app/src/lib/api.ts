@@ -21,6 +21,23 @@ export function revealLedger(path: string): Promise<void> {
   return revealItemInDir(path);
 }
 
+export interface ExportResult {
+  folder: string;
+  files: string[];
+}
+
+export function listLedgerYears(): Promise<number[]> {
+  return invoke<number[]>("ledger_years");
+}
+
+export function exportTaxYear(year: number): Promise<ExportResult> {
+  return invoke<ExportResult>("export_tax_year", { year });
+}
+
+export function revealFolder(path: string): Promise<void> {
+  return revealItemInDir(path);
+}
+
 export type KindName = "expense" | "income";
 
 export interface VoidInfo {
