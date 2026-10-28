@@ -1,7 +1,8 @@
 mod common;
 
 use ledger_core::{
-    check_no_full_number, BatchEntry, Filter, LedgerError, NewBatch, NewEntry, NewExpense, NewIncome, Replacement,
+    check_no_full_number, BatchEntry, Filter, LedgerError, NewBatch, NewEntry, NewExpense, NewIncome, NewPaymentMethod,
+    PaymentKind, PaymentMethodKey, Replacement,
 };
 
 fn expense(description: &str) -> NewExpense {
@@ -172,4 +173,74 @@ fn s_pan_6_ordinary_text_records() {
     let (_d, mut l) = common::empty();
     let t = l.record_expense(expense("Invoice 123456789012 from 2026-01-04, $1,200.50")).unwrap();
     assert_eq!(t.description, "Invoice 123456789012 from 2026-01-04, $1,200.50");
+}
+
+#[test]
+fn s_pan_8_unicode_card_numbers_refused() {
+    for t in [
+        "４２４２ ４２４２ ４２４２ ４２４２",
+        "４２４２４２４２４２４２４２４２",
+        "Visa ４２４２ ４２４２ ４２４２ ４２４２ exp 12/27",
+        "٤٢٤٢ ٤٢٤٢ ٤٢٤٢ ٤٢٤٢",
+        "۴۲۴۲-۴۲۴۲-۴۲۴۲-۴۲۴۲",
+        "४२४२४२४२४२४२४२४२",
+        "4242 ４２４２ ٤٢٤٢ ۴۲۴۲",
+        "42４2424242424242",
+    ] {
+        assert!(is_card(t), "expected card refusal for {t}");
+    }
+}
+
+#[test]
+fn s_pan_9_unicode_account_numbers_refused() {
+    for t in ["１２３４５６７８９０１２３", "acct ٠٠٠١٢٣٤٥٦٧٨٩٠١٢", "４２４２ ４２４２ ４２４２ ４２４１"] {
+        assert!(is_account(t), "expected account refusal for {t}");
+    }
+}
+
+#[test]
+fn s_pan_10_unicode_ordinary_numbers_pass() {
+    for t in ["Invoice １２３４５６７８９０１２", "２０２６-１０-２８", "٢٠٢٦-١٠-٢٨", "Card ending ４２４２", "Order ١٢٣٤-٥٦٧٨-٩٠١٢"] {
+        assert!(check_no_full_number("description", t).is_ok(), "expected pass for {t:?}");
+    }
+}
+
+#[test]
+fn s_pan_11_unicode_refusals_hide_every_digit() {
+    for t in ["Visa ４２４２ ４２４２ ４２４２ ４２４２", "acct ٠٠٠١٢٣٤٥٦٧٨٩٠١٢", "४२४२४२४२४२४२४२४२"] {
+        let m = check_no_full_number("description", t).unwrap_err().to_string();
+        assert!(m.contains("last 4 digits") && m.contains("nothing was stored"), "{m}");
+        let rest = m.replace("last 4 digits", "").replace("last4", "");
+        assert!(!rest.chars().any(char::is_numeric), "{m}");
+        assert!(!m.contains('\u{2014}'), "{m}");
+    }
+}
+
+#[test]
+fn s_pan_12_unicode_digits_in_payment_method_fields() {
+    let (_d, mut l) = common::empty();
+    let pm = |nickname: &str, last4: Option<&str>| NewPaymentMethod {
+        kind: PaymentKind::Card,
+        nickname: nickname.to_string(),
+        last4: last4.map(String::from),
+        make_default: false,
+    };
+    let e = l.create_payment_method(pm("Visa ４２４２ ４２４２ ４２４２ ４２４２", None)).unwrap_err();
+    assert!(matches!(e, LedgerError::CardNumberInText { ref field } if field == "nickname"), "{e}");
+    let e = l.create_payment_method(pm("Acct ١٢٣٤٥٦٧٨٩٠١٢٣", None)).unwrap_err();
+    assert!(matches!(e, LedgerError::AccountNumberInText { ref field } if field == "nickname"), "{e}");
+    // last4 stays exactly 4 ASCII digits (D29); a fullwidth full number is refused by the guard first.
+    let e = l.create_payment_method(pm("Visa", Some("４２４２"))).unwrap_err();
+    assert!(matches!(e, LedgerError::InvalidLast4), "{e}");
+    let e = l.create_payment_method(pm("Visa", Some("４２４２ ４２４２ ４２４２ ４２４２"))).unwrap_err();
+    assert!(matches!(e, LedgerError::CardNumberInText { ref field } if field == "last4"), "{e}");
+    l.create_payment_method(pm("Biz Visa", Some("4242"))).unwrap();
+    let e = l
+        .rename_payment_method(&PaymentMethodKey::Nickname("Biz Visa".into()), "۴۲۴۲-۴۲۴۲-۴۲۴۲-۴۲۴۲")
+        .unwrap_err();
+    assert!(matches!(e, LedgerError::CardNumberInText { ref field } if field == "nickname"), "{e}");
+    let conn = rusqlite::Connection::open(l.path()).unwrap();
+    let methods: i64 = conn.query_row("SELECT count(*) FROM payment_methods", [], |r| r.get(0)).unwrap();
+    let changes: i64 = conn.query_row("SELECT count(*) FROM payment_method_changes", [], |r| r.get(0)).unwrap();
+    assert_eq!((methods, changes), (1, 0));
 }

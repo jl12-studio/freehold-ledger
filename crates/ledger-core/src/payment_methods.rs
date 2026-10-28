@@ -203,7 +203,8 @@ impl Ledger {
         let current = active_in(&tx, key)?;
         let new = check_nickname(nickname)?;
         check_free(&tx, &new, Some(current.id))?;
-        if current.nickname.to_lowercase() == new.to_lowercase() {
+        // D45: only the identical nickname is a no-op; a change of letter case alone is a rename.
+        if current.nickname == new {
             return Ok(current);
         }
         tx.execute(

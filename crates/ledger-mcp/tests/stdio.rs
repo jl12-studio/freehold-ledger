@@ -857,3 +857,26 @@ async fn s_mcp_16_summarize_by_payment_method() {
     assert_eq!(v["expenses_total"], "$300.00");
     client.cancel().await.ok();
 }
+
+#[tokio::test]
+async fn s_mcp_17_rename_letter_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    ok_json(&call(&client, "create_payment_method", json!({ "kind": "card", "nickname": "Biz Visa", "last4": "4242" })).await);
+
+    // S-REN-4: a letter-case-only rename is stored and the note says so.
+    let v = ok_json(&call(&client, "rename_payment_method", json!({ "payment_method": "biz visa", "nickname": "BIZ VISA" })).await);
+    assert_eq!(v["nickname"], "BIZ VISA");
+    let n = note(&v);
+    assert!(n.contains("Renamed to BIZ VISA"), "{n}");
+    let v = ok_json(&call(&client, "list_payment_methods", json!({})).await);
+    assert_eq!(v["payment_methods"][0]["nickname"], "BIZ VISA");
+
+    // S-REN-5: the identical name changes nothing and the note does not claim a rename.
+    let v = ok_json(&call(&client, "rename_payment_method", json!({ "payment_method": "BIZ VISA", "nickname": "BIZ VISA" })).await);
+    assert_eq!(v["nickname"], "BIZ VISA");
+    let n = note(&v);
+    assert!(n.contains("already has that name") && n.contains("nothing changed"), "{n}");
+    assert!(!n.contains("Renamed"), "{n}");
+    client.cancel().await.ok();
+}

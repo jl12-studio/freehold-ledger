@@ -83,8 +83,19 @@ fn s_pmt_4_rename() {
     assert!(matches!(e, LedgerError::NicknameTaken(ref n) if n == "Checking"), "{e}");
     assert_eq!(l.find_payment_method(&nick("biz visa")).unwrap().id, 1);
     assert_eq!(l.find_payment_method(&PaymentMethodKey::Id(1)).unwrap().nickname, "Biz Visa");
-    l.rename_payment_method(&PaymentMethodKey::Id(1), "BIZ VISA").unwrap();
-    assert_eq!(count(&l, "payment_method_changes"), 1);
+    // D45 (S-REN-1): a change of letter case alone is a rename and writes one row.
+    let p = l.rename_payment_method(&PaymentMethodKey::Id(1), "BIZ VISA").unwrap();
+    assert_eq!(p.nickname, "BIZ VISA");
+    assert_eq!(count(&l, "payment_method_changes"), 2);
+    assert_eq!(l.find_payment_method(&nick("biz visa")).unwrap().nickname, "BIZ VISA");
+    // S-REN-2: the identical name, even with surrounding spaces, writes nothing.
+    let p = l.rename_payment_method(&nick("BIZ VISA"), "  BIZ VISA ").unwrap();
+    assert_eq!(p.nickname, "BIZ VISA");
+    assert_eq!(count(&l, "payment_method_changes"), 2);
+    // S-REN-3: another active method's name in a different case is still taken.
+    let e = l.rename_payment_method(&PaymentMethodKey::Id(1), "CHECKING").unwrap_err();
+    assert!(matches!(e, LedgerError::NicknameTaken(ref n) if n == "Checking"), "{e}");
+    assert_eq!(count(&l, "payment_method_changes"), 2);
 }
 
 #[test]

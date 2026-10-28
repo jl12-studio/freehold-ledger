@@ -1140,11 +1140,19 @@ impl LedgerTools {
         respond((|| {
             let i: RenamePaymentMethodInput = parse_args(args)?;
             let key: ledger_core::PaymentMethodKey = i.payment_method.into();
-            let p = self.with_ledger(|l| Ok(l.rename_payment_method(&key, &i.nickname)?))?;
-            let note = format!(
-                "Renamed to {}. Entries already on it now show the new name, and the old name stays in the history.",
-                p.nickname
-            );
+            let (before, p) = self.with_ledger(|l| {
+                let before = l.find_payment_method(&key)?.nickname;
+                let p = l.rename_payment_method(&key, &i.nickname)?;
+                Ok((before, p))
+            })?;
+            let note = if p.nickname == before {
+                format!("{} already has that name, so nothing changed.", p.nickname)
+            } else {
+                format!(
+                    "Renamed to {}. Entries already on it now show the new name, and the old name stays in the history.",
+                    p.nickname
+                )
+            };
             Ok(with_note(serde_json::to_value(&p).expect("payment method serializes"), note))
         })())
     }

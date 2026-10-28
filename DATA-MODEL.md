@@ -96,7 +96,7 @@ A whole batch can be undone in one step, which voids every live entry in it (rep
 
 ## Payment methods
 
-A payment method is a card, a bank account, cash, or something else the business pays with or gets paid into. Each has a nickname, such as "Business Visa", and, for cards and accounts, optionally the last 4 digits of its number. The ledger never keeps a full card or account number, an expiry date or a security code. Any text that holds a full card number, or any run of 13 or more digits, is refused before it is stored, wherever it is typed.
+A payment method is a card, a bank account, cash, or something else the business pays with or gets paid into. Each has a nickname, such as "Business Visa", and, for cards and accounts, optionally the last 4 digits of its number. The ledger never keeps a full card or account number, an expiry date or a security code. Any text that holds a full card number, or any run of 13 or more digits, is refused before it is stored, wherever it is typed. Digits in any script count, so fullwidth or Arabic-Indic digits are refused the same way.
 
 | Table | In plain words |
 |---|---|
