@@ -11,8 +11,18 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 
 import App from "../App.vue";
 import { seedInvoke } from "./fixtures/mockInvoke";
+import { businesses } from "./fixtures/seed";
 
 const PATH = "/Users/pat/Ledger/freehold-ledger.sqlite3";
+
+function emptyLedger() {
+  invoke.mockImplementation((cmd: string, args?: never) => {
+    if (cmd === "ledger_info")
+      return Promise.resolve({ path: PATH, schema_version: 4, transaction_count: 0, current_business_id: 1 });
+    if (cmd === "list_businesses") return Promise.resolve([{ ...businesses[0], transaction_count: 0 }]);
+    return seedInvoke(cmd, args);
+  });
+}
 
 async function launch() {
   const wrapper = mount(App);
@@ -29,12 +39,12 @@ describe("Freehold Ledger window", () => {
   afterEach(() => vi.useRealTimers());
 
   it("s_ui_1_empty_ledger_shows_ready_state_with_path", async () => {
-    invoke.mockResolvedValue({ path: PATH, schema_version: 1, transaction_count: 0 });
+    emptyLedger();
     const wrapper = await launch();
 
     expect(invoke).toHaveBeenCalledWith("ledger_info");
-    expect(wrapper.text()).toContain("Your ledger is ready");
-    expect(wrapper.text()).toContain("Nothing has been recorded yet.");
+    expect(wrapper.text()).toContain("Nothing recorded in My business yet");
+    expect(wrapper.text()).toContain("Tell your agent what you bought or earned and it lands here.");
     expect(wrapper.text()).toContain("Show the ledger file");
     expect(wrapper.text()).toContain(PATH);
     expect(wrapper.find(`[title="${PATH}"]`).exists()).toBe(true);
@@ -49,7 +59,7 @@ describe("Freehold Ledger window", () => {
     expect(wrapper.text()).toContain(message);
     expect(wrapper.text()).toContain(PATH);
     expect(wrapper.text().split("Nothing was changed.").length - 1).toBe(1);
-    expect(wrapper.text()).not.toContain("Your ledger is ready");
+    expect(wrapper.text()).not.toContain("Nothing recorded in");
     expect(wrapper.text()).toContain("Show in Finder");
   });
 
@@ -64,7 +74,7 @@ describe("Freehold Ledger window", () => {
   });
 
   it("show_in_finder_calls_reveal_with_path", async () => {
-    invoke.mockResolvedValue({ path: PATH, schema_version: 1, transaction_count: 0 });
+    emptyLedger();
     const wrapper = await launch();
 
     const header = wrapper.findAll("button").find((b) => b.text() === "Show in Finder")!;
@@ -92,7 +102,7 @@ describe("Freehold Ledger window", () => {
     const wrapper = await launch();
 
     expect(wrapper.find("table").exists()).toBe(true);
-    expect(wrapper.text()).not.toContain("Your ledger is ready");
+    expect(wrapper.text()).not.toContain("Nothing recorded in");
   });
 
   it("trail_link_to_a_hidden_voided_entry_shows_and_focuses_it", async () => {

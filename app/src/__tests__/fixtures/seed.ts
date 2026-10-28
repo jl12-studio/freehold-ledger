@@ -1,14 +1,16 @@
-import type { Category, PaymentMethod, PaymentMethodRef, Transaction } from "../../lib/api";
+import type { Business, Category, PaymentMethod, PaymentMethodRef, Transaction } from "../../lib/api";
 
-const BUSINESS_VISA: PaymentMethodRef = { id: 1, kind: "card", nickname: "Business Visa", last4: "4242", retired: false };
-const CHECKING: PaymentMethodRef = { id: 2, kind: "bank_account", nickname: "Checking", last4: "6789", retired: false };
-const CASH: PaymentMethodRef = { id: 3, kind: "cash", nickname: "Cash", last4: null, retired: false };
-const OLD_AMEX: PaymentMethodRef = { id: 4, kind: "card", nickname: "Old Amex", last4: "0005", retired: true };
+const BUSINESS_VISA: PaymentMethodRef = { id: 1, business_id: 1, kind: "card", nickname: "Business Visa", last4: "4242", retired: false };
+const CHECKING: PaymentMethodRef = { id: 2, business_id: 1, kind: "bank_account", nickname: "Checking", last4: "6789", retired: false };
+const CASH: PaymentMethodRef = { id: 3, business_id: 1, kind: "cash", nickname: "Cash", last4: null, retired: false };
+const TEST_CARD: PaymentMethodRef = { id: 5, business_id: 2, kind: "card", nickname: "Test card", last4: "1111", retired: false };
+const OLD_AMEX: PaymentMethodRef = { id: 4, business_id: 1, kind: "card", nickname: "Old Amex", last4: "0005", retired: true };
 
 // Shaped like the Rust serde output of the JIP-472 seed (newest first).
 export const seedTransactions: Transaction[] = [
   {
     "id": 1,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2026-10-20",
     "amount_cents": 30000,
@@ -28,6 +30,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 2,
+    "business_id": 1,
     "kind": "income",
     "occurred_on": "2026-10-15",
     "amount_cents": 120000,
@@ -47,6 +50,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 10,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2026-09-30",
     "amount_cents": 2500,
@@ -66,6 +70,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 3,
+    "business_id": 1,
     "kind": "income",
     "occurred_on": "2026-08-03",
     "amount_cents": 8500,
@@ -85,6 +90,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 4,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2026-07-12",
     "amount_cents": 4210,
@@ -110,6 +116,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 6,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2026-06-01",
     "amount_cents": 1999,
@@ -132,6 +139,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 5,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2026-06-01",
     "amount_cents": 1999,
@@ -151,6 +159,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 8,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2026-05-05",
     "amount_cents": 30000,
@@ -170,6 +179,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 7,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2026-05-05",
     "amount_cents": 3000,
@@ -192,6 +202,7 @@ export const seedTransactions: Transaction[] = [
   },
   {
     "id": 9,
+    "business_id": 1,
     "kind": "expense",
     "occurred_on": "2025-12-15",
     "amount_cents": 90000,
@@ -203,6 +214,46 @@ export const seedTransactions: Transaction[] = [
     "is_asset": false,
     "income_source": null,
     "payment_method": OLD_AMEX,
+    "replaces_id": null,
+    "replaced_by_id": null,
+    "recorded_at": "2026-10-28T02:15:47.940Z",
+    "void": null,
+    "classification_history": []
+  },
+  {
+    "id": 12,
+    "business_id": 2,
+    "kind": "income",
+    "occurred_on": "2026-10-02",
+    "amount_cents": 3000,
+    "description": "Test sale",
+    "original_category": "gross_receipts",
+    "category": "gross_receipts",
+    "category_label": "Gross receipts or sales",
+    "schedule_c_line": "1",
+    "is_asset": false,
+    "income_source": "Test buyer",
+    "payment_method": null,
+    "replaces_id": null,
+    "replaced_by_id": null,
+    "recorded_at": "2026-10-28T02:15:47.940Z",
+    "void": null,
+    "classification_history": []
+  },
+  {
+    "id": 11,
+    "business_id": 2,
+    "kind": "expense",
+    "occurred_on": "2026-10-01",
+    "amount_cents": 1200,
+    "description": "Test sticker order",
+    "original_category": "supplies",
+    "category": "supplies",
+    "category_label": "Supplies",
+    "schedule_c_line": "22",
+    "is_asset": false,
+    "income_source": null,
+    "payment_method": TEST_CARD,
     "replaces_id": null,
     "replaced_by_id": null,
     "recorded_at": "2026-10-28T02:15:47.940Z",
@@ -258,6 +309,7 @@ export const categories: Category[] = [
 ];
 
 export const sources: string[] = ["Etsy", "Upwork"];
+export const testShopSources: string[] = ["Test buyer"];
 
 const pmMeta = { created_at: "2026-10-28T02:15:47.940Z" };
 export const paymentMethods: PaymentMethod[] = [
@@ -265,4 +317,11 @@ export const paymentMethods: PaymentMethod[] = [
   { ...CASH, is_default: false, ...pmMeta, retired_at: null, transaction_count: 1 },
   { ...CHECKING, is_default: false, ...pmMeta, retired_at: null, transaction_count: 2 },
   { ...OLD_AMEX, is_default: false, ...pmMeta, retired_at: "2026-10-28T02:15:47.940Z", transaction_count: 1 },
+  { ...TEST_CARD, is_default: true, ...pmMeta, retired_at: null, transaction_count: 1 },
+];
+
+const biz = { archived: false, created_at: "2026-10-28T02:15:47.940Z", archived_at: null };
+export const businesses: Business[] = [
+  { id: 1, name: "My business", note: null, is_test: false, is_current: true, transaction_count: 10, ...biz },
+  { id: 2, name: "Test shop", note: "For trying things out", is_test: true, is_current: false, transaction_count: 2, ...biz },
 ];

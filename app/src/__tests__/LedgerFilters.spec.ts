@@ -33,7 +33,7 @@ describe("Ledger filters", () => {
 
   it("filters_send_expected_filter_and_clear_resets", async () => {
     const wrapper = await launch();
-    expect(lastFilter()).toEqual({ include_voided: true });
+    expect(lastFilter()).toEqual({ include_voided: true, business_id: 1 });
     expect(clearButtons(wrapper)).toHaveLength(0);
     expect(wrapper.findAll("label > span").map((l) => l.text())).toEqual(
       expect.arrayContaining(["From", "To", "Kind", "Category", "Source", "Show voided entries"]),
@@ -44,31 +44,31 @@ describe("Ledger filters", () => {
     expect(source.attributes("disabled")).toBeUndefined();
     await wrapper.get("select[name='kind']").setValue("income");
     await flushPromises();
-    expect(lastFilter()).toEqual({ kind: "income", include_voided: true });
+    expect(lastFilter()).toEqual({ kind: "income", include_voided: true, business_id: 1 });
     expect(ids(wrapper)).toEqual([2, 3]);
     expect(wrapper.get("select[name='source']").attributes("disabled")).toBeUndefined();
     expect(wrapper.get("select[name='source']").text()).toContain("Upwork");
 
     await wrapper.get("select[name='source']").setValue("Etsy");
     await flushPromises();
-    expect(lastFilter()).toEqual({ kind: "income", source: "Etsy", include_voided: true });
+    expect(lastFilter()).toEqual({ kind: "income", source: "Etsy", include_voided: true, business_id: 1 });
 
     // Kind = Expenses disables Source and drops it
     await wrapper.get("select[name='kind']").setValue("expense");
     await flushPromises();
     expect(wrapper.get("select[name='source']").attributes("disabled")).toBeDefined();
-    expect(lastFilter()).toEqual({ kind: "expense", include_voided: true });
+    expect(lastFilter()).toEqual({ kind: "expense", include_voided: true, business_id: 1 });
 
     // Category shows the Schedule C line
     expect(wrapper.get("select[name='category']").text()).toContain("Supplies (line 22)");
     await wrapper.get("select[name='category']").setValue("advertising");
     await flushPromises();
-    expect(lastFilter()).toEqual({ kind: "expense", category: "advertising", include_voided: true });
+    expect(lastFilter()).toEqual({ kind: "expense", category: "advertising", include_voided: true, business_id: 1 });
 
     expect(clearButtons(wrapper).length).toBeGreaterThan(0);
     await clearButtons(wrapper)[0].trigger("click");
     await flushPromises();
-    expect(lastFilter()).toEqual({ include_voided: true });
+    expect(lastFilter()).toEqual({ include_voided: true, business_id: 1 });
     expect(ids(wrapper)).toHaveLength(10);
     expect(clearButtons(wrapper)).toHaveLength(0);
   });
@@ -85,18 +85,18 @@ describe("Ledger filters", () => {
 
     await select().setValue("1");
     await flushPromises();
-    expect(lastFilter()).toEqual({ payment_method: "1", include_voided: true });
+    expect(lastFilter()).toEqual({ payment_method: "1", include_voided: true, business_id: 1 });
     expect(ids(wrapper)).toEqual([1, 10]);
     expect(clearButtons(wrapper).length).toBeGreaterThan(0);
 
     await select().setValue("none");
     await flushPromises();
-    expect(lastFilter()).toEqual({ payment_method: "none", include_voided: true });
+    expect(lastFilter()).toEqual({ payment_method: "none", include_voided: true, business_id: 1 });
     expect([...ids(wrapper)].sort((a, b) => a - b)).toEqual([5, 6, 7, 8]);
 
     await clearButtons(wrapper)[0].trigger("click");
     await flushPromises();
-    expect(lastFilter()).toEqual({ include_voided: true });
+    expect(lastFilter()).toEqual({ include_voided: true, business_id: 1 });
     expect((select().element as HTMLSelectElement).value).toBe("");
     expect(clearButtons(wrapper)).toHaveLength(0);
   });
@@ -112,7 +112,7 @@ describe("Ledger filters", () => {
     await vi.advanceTimersByTimeAsync(2);
     vi.useRealTimers();
     await flushPromises();
-    expect(lastFilter()).toEqual({ from: "2026-07-01", to: "2026-09-30", include_voided: true });
+    expect(lastFilter()).toEqual({ from: "2026-07-01", to: "2026-09-30", include_voided: true, business_id: 1 });
     expect(ids(wrapper)).toEqual([10, 3, 4]);
   });
 
@@ -120,7 +120,7 @@ describe("Ledger filters", () => {
     const wrapper = await launch();
     await wrapper.get("input[type='checkbox']").setValue(false);
     await flushPromises();
-    expect(lastFilter()).toEqual({ include_voided: false });
+    expect(lastFilter()).toEqual({ include_voided: false, business_id: 1 });
     expect(ids(wrapper)).toHaveLength(8);
     expect(ids(wrapper)).not.toContain(6);
     expect(ids(wrapper)).not.toContain(7);

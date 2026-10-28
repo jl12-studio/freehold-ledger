@@ -5,6 +5,23 @@ export interface LedgerInfo {
   path: string;
   schema_version: number;
   transaction_count: number;
+  current_business_id: number | null;
+}
+
+export interface Business {
+  id: number;
+  name: string;
+  note: string | null;
+  is_test: boolean;
+  archived: boolean;
+  is_current: boolean;
+  created_at: string;
+  archived_at: string | null;
+  transaction_count: number;
+}
+
+export function listBusinesses(): Promise<Business[]> {
+  return invoke<Business[]>("list_businesses");
 }
 
 export interface AppError {
@@ -24,14 +41,15 @@ export function revealLedger(path: string): Promise<void> {
 export interface ExportResult {
   folder: string;
   files: string[];
+  business: string;
 }
 
-export function listLedgerYears(): Promise<number[]> {
-  return invoke<number[]>("ledger_years");
+export function listLedgerYears(businessId: number): Promise<number[]> {
+  return invoke<number[]>("ledger_years", { businessId });
 }
 
-export function exportTaxYear(year: number): Promise<ExportResult> {
-  return invoke<ExportResult>("export_tax_year", { year });
+export function exportTaxYear(year: number, businessId: number): Promise<ExportResult> {
+  return invoke<ExportResult>("export_tax_year", { year, businessId });
 }
 
 export function revealFolder(path: string): Promise<void> {
@@ -55,6 +73,7 @@ export type PaymentKind = "card" | "bank_account" | "cash" | "other";
 
 export interface PaymentMethodRef {
   id: number;
+  business_id: number;
   kind: PaymentKind;
   nickname: string;
   last4: string | null;
@@ -81,6 +100,7 @@ export function paymentCaption(p: PaymentMethodRef): string {
 
 export interface Transaction {
   id: number;
+  business_id: number;
   kind: KindName;
   occurred_on: string;
   amount_cents: number;
@@ -108,6 +128,7 @@ export interface Category {
 
 /** What the window sends: empty fields are omitted. */
 export interface Filter {
+  business_id?: number;
   from?: string;
   to?: string;
   kind?: KindName;
@@ -125,12 +146,12 @@ export function listCategories(): Promise<Category[]> {
   return invoke<Category[]>("list_categories");
 }
 
-export function listPaymentMethods(): Promise<PaymentMethod[]> {
-  return invoke<PaymentMethod[]>("list_payment_methods");
+export function listPaymentMethods(businessId: number): Promise<PaymentMethod[]> {
+  return invoke<PaymentMethod[]>("list_payment_methods", { businessId });
 }
 
-export function listIncomeSources(): Promise<string[]> {
-  return invoke<string[]>("list_income_sources");
+export function listIncomeSources(businessId: number): Promise<string[]> {
+  return invoke<string[]>("list_income_sources", { businessId });
 }
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });

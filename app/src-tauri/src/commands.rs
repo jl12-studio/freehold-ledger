@@ -1,5 +1,5 @@
 use ledger_core::{
-    Category, Filter, Kind, Ledger, LedgerError, LedgerInfo, PaymentMethod, PaymentMethodFilter, Transaction,
+    Business, BusinessKey, Category, Filter, Kind, Ledger, LedgerError, LedgerInfo, PaymentMethod, PaymentMethodFilter, Transaction,
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -66,6 +66,9 @@ pub struct FilterDto {
     pub payment_method: Option<String>,
     #[serde(default)]
     pub include_voided: bool,
+    /// None means the whole file.
+    #[serde(default)]
+    pub business_id: Option<i64>,
 }
 
 fn non_empty(v: &Option<String>) -> Option<&str> {
@@ -101,7 +104,7 @@ impl FilterDto {
             is_asset: None,
             batch_id: None,
             payment_method,
-            business_id: None,
+            business_id: self.business_id,
             include_voided: self.include_voided,
             limit: None,
         })
@@ -145,13 +148,25 @@ pub fn list_categories() -> Vec<Category> {
 }
 
 #[tauri::command]
-pub fn list_income_sources(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
-    with_ledger(&state, |l| l.income_sources())
+pub fn list_income_sources(
+    state: State<'_, AppState>,
+    business_id: i64,
+) -> Result<Vec<String>, AppError> {
+    with_ledger(&state, |l| l.income_sources_in(business_id))
 }
 
 #[tauri::command]
-pub fn list_payment_methods(state: State<'_, AppState>) -> Result<Vec<PaymentMethod>, AppError> {
-    with_ledger(&state, |l| l.payment_methods(true))
+pub fn list_payment_methods(
+    state: State<'_, AppState>,
+    business_id: i64,
+) -> Result<Vec<PaymentMethod>, AppError> {
+    with_ledger(&state, |l| l.payment_methods_in(Some(&BusinessKey::Id(business_id)), true))
+}
+
+/// Every business, archived included, for the window's business switcher.
+#[tauri::command]
+pub fn list_businesses(state: State<'_, AppState>) -> Result<Vec<Business>, AppError> {
+    with_ledger(&state, |l| l.businesses(true))
 }
 
 /// Current calendar year (UTC), from the system clock.
@@ -173,8 +188,8 @@ fn current_year() -> i32 {
 
 /// Distinct years with any entry (voided included), newest first; the current year is always present.
 #[tauri::command]
-pub fn ledger_years(state: State<'_, AppState>) -> Result<Vec<i32>, AppError> {
-    let f = FilterDto { include_voided: true, ..Default::default() }
+pub fn ledger_years(state: State<'_, AppState>, business_id: i64) -> Result<Vec<i32>, AppError> {
+    let f = FilterDto { include_voided: true, business_id: Some(business_id), ..Default::default() }
         .to_filter()
         .map_err(|e| AppError::from_ledger(&e, &state.path))?;
     let rows = with_ledger(&state, |l| l.list(&f))?;
@@ -192,16 +207,25 @@ pub fn ledger_years(state: State<'_, AppState>) -> Result<Vec<i32>, AppError> {
 pub struct ExportResultDto {
     pub folder: String,
     pub files: Vec<String>,
+    /// Name of the business the export is for.
+    pub business: String,
 }
 
-/// Writes the year's export to the default folder; nothing is written on failure.
+/// Writes the year's export for one business to the default folder; nothing is written on failure.
 #[tauri::command]
 pub fn export_tax_year(
     state: State<'_, AppState>,
     year: i32,
+    business_id: i64,
 ) -> Result<ExportResultDto, AppError> {
-    let r = with_ledger(&state, |l| l.export_tax_year(year, None))?;
-    Ok(ExportResultDto { folder: r.folder.display().to_string(), files: r.files })
+    let r = with_ledger(&state, |l| {
+        l.export_tax_year_in(year, Some(&BusinessKey::Id(business_id)), None)
+    })?;
+    Ok(ExportResultDto {
+        folder: r.folder.display().to_string(),
+        files: r.files,
+        business: r.business.name,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -332,6 +356,40 @@ mod tests {
         let err = mk("visa").to_filter().unwrap_err();
         let path = std::path::PathBuf::from("/x");
         assert_eq!(AppError::from_ledger(&err, &path).kind, "invalid_input");
+    }
+
+    #[test]
+    fn filter_dto_carries_business_id() {
+        let dto = FilterDto { business_id: Some(2), ..Default::default() };
+        assert_eq!(dto.to_filter().unwrap().business_id, Some(2));
+        assert_eq!(FilterDto::default().to_filter().unwrap().business_id, None);
+    }
+
+    #[test]
+    fn business_scoped_reads_on_a_seeded_ledger() {
+        let dir = std::env::temp_dir().join(format!("fl-app-scoped-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut l = Ledger::open(&dir.join("l.sqlite3")).unwrap();
+        ledger_core::seed_demo(&mut l).unwrap();
+        ledger_core::seed_demo_payment_methods(&mut l).unwrap();
+        ledger_core::seed_demo_businesses(&mut l).unwrap();
+
+        assert_eq!(l.income_sources_in(2).unwrap(), vec!["Test buyer".to_string()]);
+        let methods = l.payment_methods_in(Some(&BusinessKey::Id(2)), true).unwrap();
+        assert_eq!(methods.iter().map(|m| m.nickname.as_str()).collect::<Vec<_>>(), vec!["Test card"]);
+        let f = FilterDto { business_id: Some(2), include_voided: true, ..Default::default() }
+            .to_filter()
+            .unwrap();
+        let ids: Vec<i64> = l.list(&f).unwrap().iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec![12, 11]);
+
+        assert_eq!(l.businesses(true).unwrap().len(), 2);
+        let one = FilterDto { business_id: Some(1), include_voided: true, ..Default::default() }
+            .to_filter()
+            .unwrap();
+        assert_eq!(l.list(&one).unwrap().len(), 10);
+        drop(l);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

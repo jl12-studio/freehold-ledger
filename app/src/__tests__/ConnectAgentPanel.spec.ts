@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
   writeText: (...a: unknown[]) => writeText(...a),
 }));
 
+import { businesses } from "./fixtures/seed";
 import App from "../App.vue";
 
 const LEDGER = "/Users/pat/Library/Application Support/org.freeholders.ledger/ledger.sqlite3";
@@ -38,7 +39,11 @@ function info(over: Record<string, unknown> = {}) {
 
 function route(connection: ReturnType<typeof info>) {
   invoke.mockImplementation(async (cmd: string) => {
-    if (cmd === "ledger_info") return { path: LEDGER, schema_version: 1, transaction_count: 0 };
+    if (cmd === "ledger_info") return { path: LEDGER, schema_version: 4, transaction_count: 0, current_business_id: 1 };
+    if (cmd === "list_businesses") return [{ ...businesses[0], transaction_count: 0 }];
+    if (cmd === "list_categories") return [];
+    if (cmd === "list_income_sources" || cmd === "list_payment_methods") return [];
+    if (cmd === "list_transactions") return [];
     if (cmd === "mcp_connection_info") return connection;
     if (cmd === "ledger_years") return [2026];
     throw new Error(`unexpected ${cmd}`);
@@ -139,7 +144,7 @@ describe("Connect your agent panel", () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushPromises();
     expect(wrapper.text()).toContain(
-      "Nothing has been recorded yet. Connect your agent and tell it what you bought or earned.",
+      "Nothing recorded in My business yet",
     );
     const main = wrapper.get("main");
     const primary = main.findAll("button")[0];

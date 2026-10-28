@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 
 import App from "../App.vue";
 import { seedInvoke } from "./fixtures/mockInvoke";
+import { businesses } from "./fixtures/seed";
 
 const FOLDER = "/Users/pat/Documents/Freehold Ledger/exports/Freehold Ledger 2026 export";
 
@@ -44,9 +45,9 @@ describe("Export tax year control", () => {
     await button.trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("export_tax_year", { year: 2026 });
+    expect(invoke).toHaveBeenCalledWith("export_tax_year", { year: 2026, businessId: 1 });
     const status = wrapper.get("[role='status']");
-    expect(status.text()).toContain(`Exported 2026 to ${FOLDER}`);
+    expect(status.text()).toContain(`Exported My business 2026 to ${FOLDER}`);
 
     const reveal = status.findAll("button").find((b) => b.text() === "Show in Finder")!;
     await reveal.trigger("click");
@@ -118,10 +119,14 @@ describe("Export tax year control", () => {
   });
 
   it("shown_in_empty_state", async () => {
-    invoke.mockImplementation((cmd: string) =>
+    invoke.mockImplementation((cmd: string, args?: never) =>
       cmd === "ledger_years"
         ? Promise.resolve([2026])
-        : Promise.resolve({ path: "/x/l.sqlite3", schema_version: 1, transaction_count: 0 }),
+        : cmd === "ledger_info"
+          ? Promise.resolve({ path: "/x/l.sqlite3", schema_version: 4, transaction_count: 0, current_business_id: 1 })
+          : cmd === "list_businesses"
+            ? Promise.resolve([{ ...businesses[0], transaction_count: 0 }])
+            : seedInvoke(cmd, args),
     );
     const wrapper = await launch();
     expect(wrapper.findAll("button").some((b) => b.text() === "Export")).toBe(true);
