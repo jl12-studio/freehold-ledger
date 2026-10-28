@@ -1,5 +1,6 @@
 use crate::categories::valid_keys;
 use crate::model::Kind;
+use chrono::NaiveDate;
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
@@ -31,4 +32,6 @@ pub enum LedgerError {
     AlreadyVoided(i64),
     #[error("Transaction {0} was voided; record a new one instead.")]
     Voided(i64),
+    #[error("The start date {from} is after the end date {to}. Put the earlier date first.")]
+    InvalidRange { from: NaiveDate, to: NaiveDate },
 }

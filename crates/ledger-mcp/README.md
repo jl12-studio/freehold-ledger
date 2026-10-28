@@ -1,0 +1,3 @@
+# ledger-mcp
+
+`ledger-mcp` is the Freehold Ledger MCP server: a small binary that speaks the Model Context Protocol over stdio only (it opens no socket and has no network flags) and exposes the ledger operations as tools, so an agent can keep the books by conversation. It is a thin layer over `ledger-core`, so the app and the server follow the same rules on the same SQLite file. It opens the ledger at `ledger_core::default_db_path()`, and the `FREEHOLD_LEDGER_DB` environment variable overrides that path (set it to a scratch file while you try things out). If the file cannot be opened, the server still starts and every tool answers with the reason. See `docs/AGENT-GUIDE.md` for how an agent should use the tools.

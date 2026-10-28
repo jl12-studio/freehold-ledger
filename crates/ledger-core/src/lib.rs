@@ -6,6 +6,7 @@ mod migrations;
 mod model;
 mod ops;
 mod seed;
+mod summary;
 
 pub use db::{default_db_path, resolve_db_path, Ledger, LedgerInfo, SUPPORTED_SCHEMA};
 pub use error::LedgerError;
@@ -16,3 +17,4 @@ pub use model::{
 };
 pub use ops::parse_date;
 pub use seed::seed_demo;
+pub use summary::{resolve_period, CategoryTotal, Period, SourceTotal, Summary, SummaryRequest, Totals};
