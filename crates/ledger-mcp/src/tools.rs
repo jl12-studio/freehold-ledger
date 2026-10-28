@@ -407,16 +407,20 @@ impl LedgerTools {
                 is_asset: i.is_asset.unwrap_or(false),
             };
             let t = self.with_ledger(|l| Ok(l.record_expense(new)?))?;
+            // The agent records with defaults instead of asking first, so every note names the
+            // date and category that were actually stored, for the person to correct.
+            let date = t.occurred_on;
+            let filed_under = format!(
+                "{}{}",
+                t.category_label,
+                t.schedule_c_line.as_deref().map(|l| format!(" (Schedule C line {l})")).unwrap_or_default()
+            );
             let note = if t.is_asset {
-                "Marked as an asset: equipment kept over a year can often be deducted all at once or over several years; your tax preparer will choose, and the export lists assets separately.".to_string()
+                format!("Recorded on {date} and marked as an asset under {filed_under}: equipment kept over a year can often be deducted all at once or over several years; your tax preparer will choose, and the export lists assets separately.")
             } else if t.category == "uncategorized" {
-                "Recorded as uncategorized: reclassify it once you know the category so it lands on the right Schedule C line.".to_string()
+                format!("Recorded on {date} as uncategorized: reclassify it once you know the category so it lands on the right Schedule C line.")
             } else {
-                format!(
-                    "Recorded as {}{}: it counts toward your deductions for the year.",
-                    t.category_label,
-                    t.schedule_c_line.as_deref().map(|l| format!(" (Schedule C line {l})")).unwrap_or_default()
-                )
+                format!("Recorded on {date} as {filed_under}: it counts toward your deductions for the year.")
             };
             Ok(with_note(txn_json(&t), note))
         })())

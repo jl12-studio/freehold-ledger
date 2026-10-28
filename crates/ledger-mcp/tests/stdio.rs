@@ -148,6 +148,11 @@ async fn s_mcp_2_scene_and_corrections_via_tools_only() {
     assert_eq!(device["occurred_on"], today());
     assert_eq!(device["is_asset"], true);
     assert!(device["note"].as_str().unwrap().contains("asset"));
+    // Recorded with defaults and no questions first: the note must name the stored date and
+    // category so the person can see what was assumed and correct it.
+    let device_note = device["note"].as_str().unwrap();
+    assert!(device_note.contains(&today()), "{device_note}");
+    assert!(device_note.contains("Supplies"), "{device_note}");
     let device_id = device["id"].as_i64().unwrap();
 
     // S-REC-2: income, and a second source spelled differently reuses the first.
@@ -212,6 +217,7 @@ async fn s_mcp_2_scene_and_corrections_via_tools_only() {
     let lunch = ok_json(&call(&client, "record_expense", json!({ "amount": "9", "description": "Stamps", "category": "uncategorized", "date": "2026-03-02" })).await);
     let lunch_id = lunch["id"].as_i64().unwrap();
     assert!(lunch["note"].as_str().unwrap().contains("uncategorized"));
+    assert!(lunch["note"].as_str().unwrap().contains("2026-03-02"), "the note names the stored date");
     let re = ok_json(&call(&client, "reclassify_transaction", json!({ "id": lunch_id, "category": "office_expense", "reason": "It was postage" })).await);
     assert_eq!(re["category"], "office_expense");
     assert_eq!(re["original_category"], "uncategorized");
