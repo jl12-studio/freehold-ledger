@@ -85,9 +85,17 @@ Nothing in the ledger is ever edited or deleted. A mistake is fixed by adding a 
 
 Voided entries never count in any total, and they always stay visible in any listing that asks for them.
 
+## Batches (imports)
+
+When rows are recorded together from a file or statement, the ledger keeps a `batches` record (a short label such as the file name, and when it was recorded) and a `transaction_batches` link from each entry to its batch. Entries recorded one at a time have no batch. A batch is created only when at least one entry was actually recorded.
+
+To stop an import from counting the same money twice, an entry is skipped (and reported) when a live entry already has the same kind, date and amount and the same description, ignoring capital letters. Voided entries do not count as matches, and an entry that repeats an earlier one in the same call is skipped too. An entry marked `allow_duplicate` is recorded anyway, for a real second charge. Both batch tables are append-only, like everything else.
+
+A whole batch can be undone in one step, which voids every live entry in it (replacements of corrected entries included) with one reason and deletes nothing. A replacement made by correcting an entry joins its original's batch.
+
 ## 6. Versions
 
-The file records its schema version. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
+The file records its schema version; the current one is schema 2 (batches were added in 2). A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
 
 ## 7. What must never be lost
 
@@ -95,6 +103,7 @@ The file records its schema version. If an older copy of the app opens a file wr
 - Every void and its reason
 - Every classification change
 - Every income source
+- Every batch and which entries it holds
 
 ## 8. What the export will contain (coming in M4)
 

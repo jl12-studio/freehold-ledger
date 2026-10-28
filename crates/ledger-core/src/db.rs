@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub const SUPPORTED_SCHEMA: u32 = 1;
+pub const SUPPORTED_SCHEMA: u32 = 2;
 
 pub fn default_db_path() -> PathBuf {
     dirs::data_dir()

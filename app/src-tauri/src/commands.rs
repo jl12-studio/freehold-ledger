@@ -86,6 +86,7 @@ impl FilterDto {
             category: non_empty(&self.category).map(str::to_string),
             source: non_empty(&self.source).map(str::to_string),
             is_asset: None,
+            batch_id: None,
             include_voided: self.include_voided,
             limit: None,
         })

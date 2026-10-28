@@ -217,6 +217,83 @@ struct RecordIncomeInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct RecordTransactionsInput {
+    /// Short label for this batch, for example the file name the rows came from ("bank-export-jan.csv"). Kept so the batch can be found and undone later.
+    label: String,
+    /// 1 to 50 entries, in file order.
+    entries: Vec<BatchEntryInput>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BatchEntryInput {
+    /// "expense" or "income".
+    kind: KindArg,
+    /// Dollars, more than zero, for example "18.17". A refund is not a negative amount: correct the original purchase with correct_transaction.
+    amount: AmountArg,
+    /// What it was, as written in the file is fine (for example "GODADDY.COM").
+    description: String,
+    /// Date of the entry, YYYY-MM-DD. Required: an import never defaults to today.
+    date: String,
+    /// Category key. Required for expenses; for income "gross_receipts" (default) or "other_income".
+    category: Option<String>,
+    /// Expenses only: equipment kept over a year.
+    is_asset: Option<bool>,
+    /// Income only: who paid.
+    source: Option<String>,
+    /// Record this entry even if it matches one already in the books (a real second charge). Defaults to false.
+    allow_duplicate: Option<bool>,
+}
+
+/// An entry-level failure in the same words core uses for its own `BatchEntry` errors.
+fn entry_error(n: usize, message: &str) -> ToolError {
+    ToolError::Input(format!("Entry {n}: {message} Nothing in this batch was recorded."))
+}
+
+fn batch_entry(n: usize, e: BatchEntryInput) -> Result<ledger_core::BatchEntry, ToolError> {
+    let occurred_on = ledger_core::parse_date(&e.date)
+        .map_err(|err| ToolError::Ledger(LedgerError::BatchEntry { index: n, reason: Box::new(err) }))?;
+    let amount_cents = dollars_to_cents(&e.amount).map_err(|err| entry_error(n, &err.message()))?;
+    if amount_cents <= 0 {
+        return Err(entry_error(
+            n,
+            "Amount must be more than $0.00. A refund or return is recorded by correcting the original purchase with correct_transaction, not as a negative amount.",
+        ));
+    }
+    let entry = match e.kind {
+        KindArg::Expense => {
+            let Some(category) = e.category else {
+                return Err(entry_error(n, "Expenses need a category key; use uncategorized to decide later."));
+            };
+            if e.source.is_some() {
+                return Err(entry_error(n, "source is for income only."));
+            }
+            ledger_core::NewEntry::Expense(ledger_core::NewExpense {
+                occurred_on: Some(occurred_on),
+                amount_cents,
+                description: e.description,
+                category,
+                is_asset: e.is_asset.unwrap_or(false),
+            })
+        }
+        KindArg::Income => {
+            if e.is_asset == Some(true) {
+                return Err(entry_error(n, "is_asset is for expenses only."));
+            }
+            ledger_core::NewEntry::Income(ledger_core::NewIncome {
+                occurred_on: Some(occurred_on),
+                amount_cents,
+                description: e.description,
+                category: e.category,
+                source: e.source.unwrap_or_default(),
+            })
+        }
+    };
+    Ok(ledger_core::BatchEntry { entry, allow_duplicate: e.allow_duplicate.unwrap_or(false) })
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ListTransactionsInput {
     /// First date to include, YYYY-MM-DD (inclusive).
     from: Option<String>,
@@ -230,6 +307,8 @@ struct ListTransactionsInput {
     source: Option<String>,
     /// Only assets (true) or only non-assets (false).
     is_asset: Option<bool>,
+    /// Only entries recorded in this batch (the batch_id from record_transactions).
+    batch_id: Option<i64>,
     /// Also list voided entries, each with its void reason. Defaults to false.
     include_voided: Option<bool>,
     /// Most entries to return, newest first. Defaults to 50; the maximum is 500.
@@ -244,6 +323,15 @@ struct ReclassifyInput {
     /// The new category key; must match the transaction's kind (see list_categories).
     category: String,
     /// Short reason for the change; it is kept in the history.
+    reason: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct VoidBatchInput {
+    /// The batch_id from record_transactions.
+    batch_id: i64,
+    /// Short reason, kept on every voided entry, for example "imported the wrong file".
     reason: String,
 }
 
@@ -393,7 +481,7 @@ impl LedgerTools {
     }
 
     #[tool(
-        description = "Record money the business spent: a purchase, bill, or fee. Use for 'I bought...', 'I paid...'. Record it right away with sensible defaults (today's date, the most likely category) and tell the person your choices afterward; do not ask first. A device, computer, camera or tool the business will keep longer than a year is equipment: set is_asset=true with category depreciation_section_179, and mention that supplies is the alternative their preparer may prefer for small items. Use uncategorized only when the person says to decide later.",
+        description = "Record money the business spent: a purchase, bill, or fee. Use for 'I bought...', 'I paid...'. Record it right away with sensible defaults (today's date, the most likely category) and tell the person your choices afterward; do not ask first. A device, computer, camera or tool the business will keep longer than a year is equipment: set is_asset=true with category depreciation_section_179, and mention that supplies is the alternative their preparer may prefer for small items. Use uncategorized only when the person says to decide later. For several rows from a statement or file, use record_transactions instead: it skips entries already in the books.",
         input_schema = schema_for_input::<RecordExpenseInput>().expect("schema")
     )]
     fn record_expense(&self, args: JsonObject) -> CallToolResult {
@@ -426,7 +514,7 @@ impl LedgerTools {
         })())
     }
     #[tool(
-        description = "Record money the business received: a payment, invoice, or sale. Use for 'a client paid me...', 'I got paid...'. Income needs a source (who paid), for example the client or platform.",
+        description = "Record money the business received: a payment, invoice, or sale. Use for 'a client paid me...', 'I got paid...'. Income needs a source (who paid), for example the client or platform. For several rows from a statement or file, use record_transactions instead: it skips entries already in the books.",
         input_schema = schema_for_input::<RecordIncomeInput>().expect("schema")
     )]
     fn record_income(&self, args: JsonObject) -> CallToolResult {
@@ -450,7 +538,77 @@ impl LedgerTools {
     }
 
     #[tool(
-        description = "List ledger entries, newest first, optionally filtered by date range, kind, category, income source, or asset flag. Voided entries are hidden unless include_voided is true. Use to answer 'what did I spend on...', to find an id before correcting something, or to review before tax time.",
+        description = "Record several expenses and income at once, for example rows from a bank export or a spreadsheet: up to 50 entries per call, all or nothing (one bad entry records none and names it). Each entry needs kind, amount, description and date; expenses need a category, income needs a source. An entry that matches a live entry already in the books (same date, kind, amount and description, any letter case) is skipped and reported, so importing the same file twice or two overlapping exports does not count anything twice; set allow_duplicate on an entry only when it really is a second charge. Give the batch a label such as the file name. A refund is not a negative amount: correct the original purchase with correct_transaction.",
+        input_schema = schema_for_input::<RecordTransactionsInput>().expect("schema")
+    )]
+    fn record_transactions(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: RecordTransactionsInput = parse_args(args)?;
+            if i.entries.is_empty() {
+                return Err(LedgerError::EmptyBatch.into());
+            }
+            if i.entries.len() > ledger_core::MAX_BATCH {
+                return Err(LedgerError::BatchTooLarge { count: i.entries.len() }.into());
+            }
+            let entries = i
+                .entries
+                .into_iter()
+                .enumerate()
+                .map(|(idx, e)| batch_entry(idx + 1, e))
+                .collect::<Result<Vec<_>, _>>()?;
+            let r = self.with_ledger(|l| Ok(l.record_batch(ledger_core::NewBatch { label: i.label, entries })?))?;
+            let recorded: Vec<Value> = r
+                .recorded
+                .iter()
+                .map(|x| {
+                    let mut v = txn_json(&x.transaction);
+                    v["entry"] = json!(x.entry);
+                    v
+                })
+                .collect();
+            let mut skipped: Vec<Value> = Vec::new();
+            for s in &r.skipped_duplicates {
+                let m = self.with_ledger(|l| Ok(l.get(s.matches_id)?))?;
+                skipped.push(json!({
+                    "entry": s.entry,
+                    "matches_id": s.matches_id,
+                    "date": m.occurred_on,
+                    "amount": format_dollars(m.amount_cents),
+                    "description": m.description,
+                }));
+            }
+            let (rc, sc) = (recorded.len(), skipped.len());
+            let note = match r.batch_id {
+                Some(id) => {
+                    let base = format!(
+                        "Recorded {rc} entries as batch {id} (\"{}\"). Each one shows the date and category it was filed under; reclassify or correct any you disagree with.",
+                        r.label
+                    );
+                    let base = format!("{base} To undo this whole batch, call void_batch with batch_id {id}.");
+                    if sc == 0 {
+                        base
+                    } else {
+                        format!("{base} {sc} looked like entries already in the books (same date, kind, amount and description) and were not recorded; if one really is a second charge, send it again with allow_duplicate set to true.")
+                    }
+                }
+                None => format!("Nothing new was recorded: all {sc} entries match entries already in the books (same date, kind, amount and description). If one really is a second charge, send it again with allow_duplicate set to true."),
+            };
+            Ok(with_note(
+                json!({
+                    "batch_id": r.batch_id,
+                    "label": r.label,
+                    "recorded_count": rc,
+                    "skipped_count": sc,
+                    "recorded": recorded,
+                    "skipped_duplicates": skipped,
+                }),
+                note,
+            ))
+        })())
+    }
+
+    #[tool(
+        description = "List ledger entries, newest first, optionally filtered by date range, kind, category, income source, or asset flag. Voided entries are hidden unless include_voided is true. Use to answer 'what did I spend on...', to find an id before correcting something, or to review before tax time. Filter by batch_id to see one import.",
         input_schema = schema_for_input::<ListTransactionsInput>().expect("schema"),
         annotations(read_only_hint = true)
     )]
@@ -469,6 +627,7 @@ impl LedgerTools {
                 category: i.category,
                 source: i.source,
                 is_asset: i.is_asset,
+                batch_id: i.batch_id,
                 include_voided: i.include_voided.unwrap_or(false),
                 limit: Some(limit),
             };
@@ -512,6 +671,42 @@ impl LedgerTools {
             Ok(with_note(
                 txn_json(&t),
                 "Voided, not deleted: it stays in your history and no longer counts in totals.",
+            ))
+        })())
+    }
+
+    #[tool(
+        description = "Undo a whole import in one call: void every entry recorded by one record_transactions batch, including replacements made by correcting those entries. Nothing is deleted: each entry stays in the history with your reason and leaves the totals. Entries already voided are skipped and counted. Use when the person says a file was imported by mistake or twice; list_transactions with batch_id shows what it holds.",
+        input_schema = schema_for_input::<VoidBatchInput>().expect("schema")
+    )]
+    fn void_batch(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: VoidBatchInput = parse_args(args)?;
+            let r = self.with_ledger(|l| Ok(l.void_batch(i.batch_id, &i.reason)?))?;
+            let (n, m) = (r.voided.len(), r.already_voided_ids.len());
+            let note = if n > 0 {
+                let base = format!(
+                    "Voided {n} entries from batch {} (\"{}\"), not deleted: they stay in your history with the reason and no longer count in totals.",
+                    r.batch_id, r.label
+                );
+                if m > 0 {
+                    format!("{base} {m} were already voided and were left as they were.")
+                } else {
+                    base
+                }
+            } else {
+                format!("Nothing left to void in batch {} (\"{}\"): all {m} entries were already voided.", r.batch_id, r.label)
+            };
+            Ok(with_note(
+                json!({
+                    "batch_id": r.batch_id,
+                    "label": r.label,
+                    "voided_count": n,
+                    "already_voided_count": m,
+                    "voided": r.voided.iter().map(txn_json).collect::<Vec<Value>>(),
+                    "already_voided_ids": r.already_voided_ids,
+                }),
+                note,
             ))
         })())
     }
@@ -637,6 +832,6 @@ impl LedgerTools {
 
 #[tool_handler(
     name = "freehold-ledger",
-    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category."
+    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call."
 )]
 impl ServerHandler for LedgerTools {}

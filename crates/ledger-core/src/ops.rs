@@ -3,7 +3,7 @@ use crate::db::Ledger;
 use crate::error::LedgerError;
 use crate::model::*;
 use chrono::{NaiveDate, SecondsFormat};
-use rusqlite::{params_from_iter, Connection, TransactionBehavior};
+use rusqlite::{params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 
 type Result<T> = std::result::Result<T, LedgerError>;
 
@@ -87,10 +87,11 @@ const BASE: &str = "SELECT t.id, t.kind, t.occurred_on, t.amount_cents, t.descri
     COALESCE((SELECT c.category FROM classification_changes c WHERE c.transaction_id = t.id ORDER BY c.id DESC LIMIT 1), t.category) AS eff, \
     t.is_asset, s.name AS src, t.replaces_id, \
     (SELECT r.id FROM transactions r WHERE r.replaces_id = t.id ORDER BY r.id LIMIT 1) AS replaced_by, \
-    t.recorded_at, v.reason, v.recorded_at AS void_at \
+    tb.batch_id, t.recorded_at, v.reason, v.recorded_at AS void_at \
     FROM transactions t \
     LEFT JOIN income_sources s ON s.id = t.income_source_id \
-    LEFT JOIN voids v ON v.transaction_id = t.id";
+    LEFT JOIN voids v ON v.transaction_id = t.id \
+    LEFT JOIN transaction_batches tb ON tb.transaction_id = t.id";
 
 fn map_row(conn: &Connection, r: &rusqlite::Row) -> Result<Transaction> {
     let id: i64 = r.get("id")?;
@@ -129,6 +130,7 @@ fn map_row(conn: &Connection, r: &rusqlite::Row) -> Result<Transaction> {
         income_source: r.get("src")?,
         replaces_id: r.get("replaces_id")?,
         replaced_by_id: r.get("replaced_by")?,
+        batch_id: r.get("batch_id")?,
         recorded_at: r.get("recorded_at")?,
         void,
         classification_history: history,
@@ -145,39 +147,112 @@ fn load(conn: &Connection, id: i64) -> Result<Transaction> {
     }
 }
 
+fn expense_row(e: NewExpense) -> Result<Row> {
+    check_amount(e.amount_cents)?;
+    let description = check_text(&e.description, LedgerError::MissingDescription)?;
+    check_category(&e.category, Kind::Expense)?;
+    Ok(Row {
+        kind: Kind::Expense,
+        occurred_on: e.occurred_on.unwrap_or_else(today),
+        amount_cents: e.amount_cents,
+        description,
+        category: e.category,
+        is_asset: e.is_asset,
+        source: None,
+    })
+}
+
+fn income_row(i: NewIncome) -> Result<Row> {
+    check_amount(i.amount_cents)?;
+    let description = check_text(&i.description, LedgerError::MissingDescription)?;
+    let category = i.category.unwrap_or_else(|| "gross_receipts".to_string());
+    check_category(&category, Kind::Income)?;
+    let source = check_text(&i.source, LedgerError::MissingSource)?;
+    Ok(Row {
+        kind: Kind::Income,
+        occurred_on: i.occurred_on.unwrap_or_else(today),
+        amount_cents: i.amount_cents,
+        description,
+        category,
+        is_asset: false,
+        source: Some(source),
+    })
+}
+
 impl Ledger {
     pub fn record_expense(&mut self, e: NewExpense) -> Result<Transaction> {
-        check_amount(e.amount_cents)?;
-        let description = check_text(&e.description, LedgerError::MissingDescription)?;
-        check_category(&e.category, Kind::Expense)?;
-        let row = Row {
-            kind: Kind::Expense,
-            occurred_on: e.occurred_on.unwrap_or_else(today),
-            amount_cents: e.amount_cents,
-            description,
-            category: e.category,
-            is_asset: e.is_asset,
-            source: None,
-        };
+        let row = expense_row(e)?;
         self.insert_one(&row)
     }
 
     pub fn record_income(&mut self, i: NewIncome) -> Result<Transaction> {
-        check_amount(i.amount_cents)?;
-        let description = check_text(&i.description, LedgerError::MissingDescription)?;
-        let category = i.category.unwrap_or_else(|| "gross_receipts".to_string());
-        check_category(&category, Kind::Income)?;
-        let source = check_text(&i.source, LedgerError::MissingSource)?;
-        let row = Row {
-            kind: Kind::Income,
-            occurred_on: i.occurred_on.unwrap_or_else(today),
-            amount_cents: i.amount_cents,
-            description,
-            category,
-            is_asset: false,
-            source: Some(source),
-        };
+        let row = income_row(i)?;
         self.insert_one(&row)
+    }
+
+    /// Records up to `MAX_BATCH` entries all or nothing, skipping entries that match a live one.
+    pub fn record_batch(&mut self, b: NewBatch) -> Result<BatchResult> {
+        let label = check_text(&b.label, LedgerError::MissingBatchLabel)?;
+        if b.entries.is_empty() {
+            return Err(LedgerError::EmptyBatch);
+        }
+        if b.entries.len() > MAX_BATCH {
+            return Err(LedgerError::BatchTooLarge { count: b.entries.len() });
+        }
+        let mut rows = Vec::with_capacity(b.entries.len());
+        for (i, be) in b.entries.into_iter().enumerate() {
+            let row = match be.entry {
+                NewEntry::Expense(e) => expense_row(e),
+                NewEntry::Income(n) => income_row(n),
+            }
+            .map_err(|e| LedgerError::BatchEntry { index: i + 1, reason: Box::new(e) })?;
+            rows.push((row, be.allow_duplicate));
+        }
+        let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut inserted: Vec<(usize, i64)> = Vec::new();
+        let mut skipped = Vec::new();
+        for (i, (row, allow)) in rows.iter().enumerate() {
+            if !allow {
+                let found: Option<i64> = tx
+                    .query_row(
+                        "SELECT t.id FROM transactions t LEFT JOIN voids v ON v.transaction_id = t.id \
+                         WHERE v.id IS NULL AND t.kind = ?1 AND t.occurred_on = ?2 AND t.amount_cents = ?3 \
+                         AND t.description = ?4 COLLATE NOCASE ORDER BY t.id LIMIT 1",
+                        rusqlite::params![
+                            row.kind.as_str(),
+                            row.occurred_on.format("%Y-%m-%d").to_string(),
+                            row.amount_cents,
+                            row.description
+                        ],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if let Some(matches_id) = found {
+                    skipped.push(SkippedDuplicate { entry: i + 1, matches_id });
+                    continue;
+                }
+            }
+            inserted.push((i + 1, insert(&tx, row, None)?));
+        }
+        let batch_id = if inserted.is_empty() {
+            None
+        } else {
+            tx.execute("INSERT INTO batches (label, recorded_at) VALUES (?1, ?2)", rusqlite::params![label, now()])?;
+            let bid = tx.last_insert_rowid();
+            for (_, id) in &inserted {
+                tx.execute(
+                    "INSERT INTO transaction_batches (transaction_id, batch_id) VALUES (?1, ?2)",
+                    rusqlite::params![id, bid],
+                )?;
+            }
+            Some(bid)
+        };
+        tx.commit()?;
+        let mut recorded = Vec::with_capacity(inserted.len());
+        for (entry, id) in inserted {
+            recorded.push(RecordedEntry { entry, transaction: load(self.conn(), id)? });
+        }
+        Ok(BatchResult { batch_id, label, recorded, skipped_duplicates: skipped })
     }
 
     fn insert_one(&mut self, row: &Row) -> Result<Transaction> {
@@ -215,6 +290,38 @@ impl Ledger {
         load(self.conn(), id)
     }
 
+    pub fn void_batch(&mut self, batch_id: i64, reason: &str) -> Result<BatchVoid> {
+        let reason = check_text(reason, LedgerError::MissingReason)?;
+        let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let label: String = match tx.query_row("SELECT label FROM batches WHERE id = ?1", [batch_id], |r| r.get(0)) {
+            Ok(l) => l,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Err(LedgerError::UnknownBatch(batch_id)),
+            Err(e) => return Err(e.into()),
+        };
+        let members: Vec<(i64, bool)> = {
+            let mut stmt = tx.prepare(
+                "SELECT tb.transaction_id, v.id IS NOT NULL FROM transaction_batches tb \
+                 LEFT JOIN voids v ON v.transaction_id = tb.transaction_id \
+                 WHERE tb.batch_id = ?1 ORDER BY tb.transaction_id",
+            )?;
+            let rows = stmt.query_map([batch_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let mut newly = Vec::new();
+        let mut already_voided_ids = Vec::new();
+        for (id, voided) in members {
+            if voided {
+                already_voided_ids.push(id);
+            } else {
+                insert_void(&tx, id, &reason)?;
+                newly.push(id);
+            }
+        }
+        tx.commit()?;
+        let voided = newly.into_iter().map(|id| load(self.conn(), id)).collect::<Result<Vec<_>>>()?;
+        Ok(BatchVoid { batch_id, label, voided, already_voided_ids })
+    }
+
     pub fn correct(&mut self, id: i64, reason: &str, r: Replacement) -> Result<Correction> {
         let reason = check_text(reason, LedgerError::MissingReason)?;
         let tx = self.conn_mut().transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -248,6 +355,11 @@ impl Ledger {
         };
         insert_void(&tx, id, &reason)?;
         let new_id = insert(&tx, &row, Some(id))?;
+        tx.execute(
+            "INSERT INTO transaction_batches (transaction_id, batch_id) \
+             SELECT ?1, batch_id FROM transaction_batches WHERE transaction_id = ?2",
+            rusqlite::params![new_id, id],
+        )?;
         tx.commit()?;
         Ok(Correction { voided: load(self.conn(), id)?, replacement: load(self.conn(), new_id)? })
     }
@@ -280,6 +392,9 @@ impl Ledger {
         }
         if let Some(a) = f.is_asset {
             add("is_asset = ?", (a as i64).to_string());
+        }
+        if let Some(b) = f.batch_id {
+            add("batch_id = ?", b.to_string());
         }
         if !f.include_voided {
             wh.push("reason IS NULL".to_string());

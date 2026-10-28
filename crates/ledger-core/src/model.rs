@@ -35,6 +35,15 @@ pub struct NewIncome {
     pub source: String,
 }
 
+/// Result of voiding a whole batch.
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchVoid {
+    pub batch_id: i64,
+    pub label: String,
+    pub voided: Vec<Transaction>,
+    pub already_voided_ids: Vec<i64>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Replacement {
     pub occurred_on: Option<NaiveDate>,
@@ -74,6 +83,8 @@ pub struct Transaction {
     pub income_source: Option<String>,
     pub replaces_id: Option<i64>,
     pub replaced_by_id: Option<i64>,
+    /// The import batch this entry was recorded in, if any.
+    pub batch_id: Option<i64>,
     pub recorded_at: String,
     pub void: Option<VoidInfo>,
     pub classification_history: Vec<ClassificationChange>,
@@ -89,6 +100,8 @@ pub struct Filter {
     /// Case-insensitive.
     pub source: Option<String>,
     pub is_asset: Option<bool>,
+    /// Only entries recorded in this import batch.
+    pub batch_id: Option<i64>,
     pub include_voided: bool,
     pub limit: Option<u32>,
 }
@@ -97,4 +110,46 @@ pub struct Filter {
 pub struct Correction {
     pub voided: Transaction,
     pub replacement: Transaction,
+}
+
+pub const MAX_BATCH: usize = 50;
+
+#[derive(Debug, Clone)]
+pub enum NewEntry {
+    Expense(NewExpense),
+    Income(NewIncome),
+}
+
+#[derive(Debug, Clone)]
+pub struct BatchEntry {
+    pub entry: NewEntry,
+    pub allow_duplicate: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewBatch {
+    pub label: String,
+    pub entries: Vec<BatchEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordedEntry {
+    /// 1-based position in the call.
+    pub entry: usize,
+    pub transaction: Transaction,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedDuplicate {
+    /// 1-based position in the call.
+    pub entry: usize,
+    pub matches_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchResult {
+    pub batch_id: Option<i64>,
+    pub label: String,
+    pub recorded: Vec<RecordedEntry>,
+    pub skipped_duplicates: Vec<SkippedDuplicate>,
 }

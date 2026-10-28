@@ -52,7 +52,7 @@ fn ok_json(r: &CallToolResult) -> Value {
     serde_json::from_str(&text(r)).expect("success content is JSON text")
 }
 
-const TEN_TOOLS: [&str; 10] = [
+const TOOLS: [&str; 12] = [
     "correct_transaction",
     "export_tax_year",
     "ledger_info",
@@ -61,19 +61,21 @@ const TEN_TOOLS: [&str; 10] = [
     "reclassify_transaction",
     "record_expense",
     "record_income",
+    "record_transactions",
     "summarize",
+    "void_batch",
     "void_transaction",
 ];
 
 #[tokio::test]
-async fn s_mcp_1_lists_ten_tools_with_descriptions() {
+async fn s_mcp_1_lists_every_tool_with_descriptions() {
     let dir = tempfile::tempdir().unwrap();
     let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
 
     let tools = client.list_all_tools().await.unwrap();
     let mut names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
     names.sort();
-    assert_eq!(names, TEN_TOOLS);
+    assert_eq!(names, TOOLS);
 
     for t in &tools {
         let desc = t.description.as_deref().unwrap_or("");
@@ -341,7 +343,7 @@ async fn ledger_info_and_categories_describe_the_books() {
 
     let info = ok_json(&call(&client, "ledger_info", json!({})).await);
     assert_eq!(info["transaction_count"], 0);
-    assert_eq!(info["schema_version"], 1);
+    assert_eq!(info["schema_version"], 2);
     assert!(info["path"].as_str().unwrap().ends_with("ledger.sqlite3"));
     assert!(info["note"].as_str().unwrap().contains("nothing is ever deleted"));
 
@@ -456,4 +458,108 @@ async fn unknown_category_filter_is_a_tool_error_not_an_empty_answer() {
     let v = ok_json(&call(&client, "summarize", json!({ "from": "2026-01-01", "to": "2026-12-31", "category": "supplies" })).await);
     assert_eq!(v["expenses_total_cents"], 60000);
     client.cancel().await.ok();
+}
+
+fn gd(date: &str, amount: &str) -> Value {
+    json!({ "kind": "expense", "amount": amount, "description": "GODADDY.COM", "date": date, "category": "other_expense" })
+}
+
+#[tokio::test]
+async fn record_transactions_skips_reimported_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let staples = json!({ "kind": "expense", "amount": "86.40", "description": "STAPLES #0412", "date": "2026-01-06", "category": "supplies" });
+    let args = json!({
+        "label": "bank-export.csv",
+        "entries": [gd("2026-01-20", "18.17"), gd("2026-01-20", "18.17"), staples],
+    });
+    let first = ok_json(&call(&client, "record_transactions", args.clone()).await);
+    assert_eq!(first["recorded_count"], 2);
+    assert_eq!(first["skipped_count"], 1);
+    assert_eq!(first["skipped_duplicates"][0]["entry"], 2);
+    assert!(first["batch_id"].is_number());
+    assert!(first["note"].as_str().unwrap().contains("allow_duplicate"));
+
+    let again = ok_json(&call(&client, "record_transactions", args).await);
+    assert_eq!(again["recorded_count"], 0);
+    assert!(again["batch_id"].is_null());
+    assert!(again["note"].as_str().unwrap().contains("Nothing new was recorded"));
+
+    let listed = ok_json(&call(&client, "list_transactions", json!({})).await);
+    assert_eq!(listed["count"], 2);
+}
+
+#[tokio::test]
+async fn void_batch_undoes_an_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let staples = json!({ "kind": "expense", "amount": "86.40", "description": "STAPLES #0412", "date": "2026-01-06", "category": "supplies" });
+    let lic = json!({ "kind": "expense", "amount": "75.00", "description": "CITY OF AUSTIN BUSINESS LICENSE", "date": "2026-01-22", "category": "taxes_licenses" });
+    let rec = ok_json(&call(&client, "record_transactions", json!({
+        "label": "bank-export.csv",
+        "entries": [gd("2026-01-20", "18.17"), staples, lic],
+    })).await);
+    assert!(rec["note"].as_str().unwrap().contains("void_batch"));
+    let bid = rec["batch_id"].as_i64().unwrap();
+
+    let v = ok_json(&call(&client, "void_batch", json!({ "batch_id": bid, "reason": "Imported the wrong file" })).await);
+    assert_eq!(v["voided_count"], 3);
+    assert_eq!(v["already_voided_count"], 0);
+    assert!(v["note"].as_str().unwrap().contains("Voided 3 entries"));
+
+    let live = ok_json(&call(&client, "list_transactions", json!({ "batch_id": bid })).await);
+    assert_eq!(live["count"], 0);
+    let all = ok_json(&call(&client, "list_transactions", json!({ "batch_id": bid, "include_voided": true })).await);
+    assert_eq!(all["count"], 3);
+
+    let s = ok_json(&call(&client, "summarize", json!({ "from": "2026-01-01", "to": "2026-12-31" })).await);
+    assert_eq!(s["expenses_total_cents"], 0);
+
+    let again = ok_json(&call(&client, "void_batch", json!({ "batch_id": bid, "reason": "again" })).await);
+    assert_eq!(again["voided_count"], 0);
+    assert!(again["note"].as_str().unwrap().contains("Nothing left to void"));
+
+    let unknown = call(&client, "void_batch", json!({ "batch_id": 999, "reason": "x" })).await;
+    assert!(is_error(&unknown));
+    assert!(text(&unknown).contains("Batch 999 was not found"));
+    let missing = call(&client, "void_batch", json!({ "batch_id": bid })).await;
+    assert!(is_error(&missing));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn record_transactions_bad_entry_is_tool_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+
+    let r = call(&client, "record_transactions", json!({
+        "label": "x", "entries": [gd("2026-01-20", "18.17"), gd("2026-01-21", "-24.99")],
+    })).await;
+    assert!(is_error(&r));
+    let t = text(&r);
+    assert!(t.contains("Entry 2"), "{t}");
+    assert!(t.contains("correct_transaction"), "{t}");
+    assert!(t.ends_with("Nothing in this batch was recorded."), "{t}");
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["transaction_count"], 0);
+
+    let many: Vec<Value> = (0..51).map(|i| gd("2026-01-05", &format!("{}.00", i + 1))).collect();
+    let r = call(&client, "record_transactions", json!({ "label": "x", "entries": many })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("50"));
+
+    let mut unknown = gd("2026-01-20", "1.00");
+    unknown["bogus"] = json!(1);
+    let r = call(&client, "record_transactions", json!({ "label": "x", "entries": [unknown] })).await;
+    assert!(is_error(&r));
+
+    let r = call(&client, "record_transactions", json!({
+        "label": "x",
+        "entries": [{ "kind": "expense", "amount": "5", "description": "no cat", "date": "2026-01-20" }],
+    })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("Entry 1"), "{}", text(&r));
+
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["transaction_count"], 0);
 }

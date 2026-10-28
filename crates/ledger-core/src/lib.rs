@@ -13,8 +13,9 @@ pub use db::{default_db_path, resolve_db_path, Ledger, LedgerInfo, SUPPORTED_SCH
 pub use error::LedgerError;
 pub use categories::{categories, category, Category};
 pub use model::{
-    ClassificationChange, Correction, Filter, Kind, NewExpense, NewIncome, Replacement, Transaction,
-    VoidInfo,
+    BatchEntry, BatchResult, BatchVoid, ClassificationChange, Correction, Filter, Kind, NewBatch, NewEntry,
+    NewExpense, NewIncome, RecordedEntry, Replacement, SkippedDuplicate, Transaction, VoidInfo,
+    MAX_BATCH,
 };
 pub use export::ExportResult;
 pub use ops::parse_date;

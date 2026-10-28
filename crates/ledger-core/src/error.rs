@@ -28,12 +28,22 @@ pub enum LedgerError {
     InvalidDate(String),
     #[error("Transaction {0} was not found.")]
     NotFound(i64),
+    #[error("Batch {0} was not found. The batch_id is in the record_transactions result and on every entry in list_transactions.")]
+    UnknownBatch(i64),
     #[error("Transaction {0} is already voided.")]
     AlreadyVoided(i64),
     #[error("Transaction {0} was voided; record a new one instead.")]
     Voided(i64),
     #[error("The start date {from} is after the end date {to}. Put the earlier date first.")]
     InvalidRange { from: NaiveDate, to: NaiveDate },
+    #[error("Give at least one entry to record.")]
+    EmptyBatch,
+    #[error("{count} entries is more than one call takes. Send at most 50 entries per call, for example 50 rows of the file at a time. Nothing was recorded.")]
+    BatchTooLarge { count: usize },
+    #[error("Give the batch a short label, for example the name of the file the rows came from.")]
+    MissingBatchLabel,
+    #[error("Entry {index}: {reason} Nothing in this batch was recorded.")]
+    BatchEntry { index: usize, reason: Box<LedgerError> },
     #[error("Could not write the export to {}: {reason}. Nothing was created.", .path.display())]
     ExportFailed { path: PathBuf, reason: String },
 }

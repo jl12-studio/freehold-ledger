@@ -17,7 +17,7 @@ fn s_file_1_fresh_open_creates_owned_ledger() {
     let ledger = Ledger::open(&path).unwrap();
     assert!(path.exists());
     let info = ledger.info().unwrap();
-    assert_eq!(info.schema_version, 1);
+    assert_eq!(info.schema_version, 2);
     assert_eq!(info.transaction_count, 0);
     assert_eq!(ledger.path(), path.as_path());
 }
@@ -73,7 +73,7 @@ fn s_file_4_newer_schema_refused_and_untouched() {
     let before = std::fs::read(&path).unwrap();
     match Ledger::open(&path) {
         Err(LedgerError::NewerSchema { found, supported }) => {
-            assert_eq!((found, supported), (99, 1));
+            assert_eq!((found, supported), (99, 2));
         }
         other => panic!("expected NewerSchema, got {:?}", other.map(|_| ())),
     }
@@ -154,6 +154,66 @@ fn s_imm_2_insert_or_replace_cannot_rewrite_append_only_rows() {
     assert_eq!(after.description, "Device");
     assert_eq!(after.void.unwrap().reason, "duplicate");
     assert_eq!(after.classification_history[0].reason, "desk lamp");
+}
+
+#[test]
+fn s_file_5_schema_1_file_upgrades() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    {
+        let c = raw(&path);
+        c.execute_batch(include_str!("../migrations/0001_init.sql")).unwrap();
+        c.execute("INSERT INTO schema_meta (key, value) VALUES ('schema_version','1')", []).unwrap();
+        c.execute(INSERT_TX, []).unwrap();
+    }
+    let mut l = Ledger::open(&path).unwrap();
+    let info = l.info().unwrap();
+    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.transaction_count, 1);
+    let r = l
+        .record_batch(ledger_core::NewBatch {
+            label: "after upgrade".into(),
+            entries: vec![ledger_core::BatchEntry {
+                entry: ledger_core::NewEntry::Expense(ledger_core::NewExpense {
+                    occurred_on: None,
+                    amount_cents: 500,
+                    description: "pens".into(),
+                    category: "supplies".into(),
+                    is_asset: false,
+                }),
+                allow_duplicate: false,
+            }],
+        })
+        .unwrap();
+    assert_eq!(r.recorded.len(), 1);
+    assert_eq!(l.info().unwrap().transaction_count, 2);
+}
+
+#[test]
+fn s_imm_3_batch_tables_are_append_only() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("ledger.sqlite3");
+    drop(Ledger::open(&path).unwrap());
+    let c = raw(&path);
+    c.execute(INSERT_TX, []).unwrap();
+    c.execute("INSERT INTO batches (label, recorded_at) VALUES ('f.csv', '2026-01-03T00:00:00Z')", []).unwrap();
+    c.execute("INSERT INTO transaction_batches (transaction_id, batch_id) VALUES (1, 1)", []).unwrap();
+    for (table, set, replace) in [
+        ("batches", "label='x'", "INSERT OR REPLACE INTO batches (id, label, recorded_at) VALUES (1, 'x', 'x')"),
+        (
+            "transaction_batches",
+            "batch_id=2",
+            "INSERT OR REPLACE INTO transaction_batches (transaction_id, batch_id) VALUES (1, 1)",
+        ),
+    ] {
+        let expected = format!("{table} are append-only");
+        let e = c.execute(&format!("UPDATE {table} SET {set}"), []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+        let e = c.execute(&format!("DELETE FROM {table}"), []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+        let e = c.execute(replace, []).unwrap_err();
+        assert!(e.to_string().contains(&expected), "{e}");
+    }
 }
 
 #[test]
