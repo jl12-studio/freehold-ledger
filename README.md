@@ -36,7 +36,14 @@ Freehold apps carry two guides: one for the person (this README and `docs/HUMAN-
 
 ## Build from source
 
-Build steps land with the app skeleton (M2).
+You need Rust, Node 24 and pnpm.
+
+```bash
+pnpm --dir app install
+pnpm --dir app tauri dev
+```
+
+The app opens the ledger at its default location. To point it somewhere else (for example a scratch file while you try things out), set `FREEHOLD_LEDGER_DB` to a file path before launching. The same variable is honored by the app, the MCP server and the tests.
 
 ## License
 

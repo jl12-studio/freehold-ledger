@@ -1,0 +1,22 @@
+[package]
+name = "freehold-ledger-app"
+version = "0.1.0"
+description = "Freehold Ledger desktop app"
+authors = ["Freeholders"]
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# The `_lib` suffix keeps the library name unique from the bin name (Windows issue rust-lang/cargo#8519).
+name = "freehold_ledger_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ledger-core = { path = "../../crates/ledger-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

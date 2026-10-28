@@ -1,0 +1,98 @@
+import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+
+export interface LedgerInfo {
+  path: string;
+  schema_version: number;
+  transaction_count: number;
+}
+
+export interface AppError {
+  kind: "not_a_ledger" | "newer_schema" | "io" | "invalid_input" | "other";
+  message: string;
+  path: string;
+}
+
+export function getLedgerInfo(): Promise<LedgerInfo> {
+  return invoke<LedgerInfo>("ledger_info");
+}
+
+export function revealLedger(path: string): Promise<void> {
+  return revealItemInDir(path);
+}
+
+export type KindName = "expense" | "income";
+
+export interface VoidInfo {
+  reason: string;
+  recorded_at: string;
+}
+
+export interface ClassificationChange {
+  category: string;
+  reason: string;
+  recorded_at: string;
+}
+
+export interface Transaction {
+  id: number;
+  kind: KindName;
+  occurred_on: string;
+  amount_cents: number;
+  description: string;
+  original_category: string;
+  category: string;
+  category_label: string;
+  schedule_c_line: string | null;
+  is_asset: boolean;
+  income_source: string | null;
+  replaces_id: number | null;
+  replaced_by_id: number | null;
+  recorded_at: string;
+  void: VoidInfo | null;
+  classification_history: ClassificationChange[];
+}
+
+export interface Category {
+  key: string;
+  schedule_c_line: string | null;
+  label: string;
+  kind: KindName;
+}
+
+/** What the window sends: empty fields are omitted. */
+export interface Filter {
+  from?: string;
+  to?: string;
+  kind?: KindName;
+  category?: string;
+  source?: string;
+  include_voided: boolean;
+}
+
+export function listTransactions(filter: Filter): Promise<Transaction[]> {
+  return invoke<Transaction[]>("list_transactions", { filter });
+}
+
+export function listCategories(): Promise<Category[]> {
+  return invoke<Category[]>("list_categories");
+}
+
+export function listIncomeSources(): Promise<string[]> {
+  return invoke<string[]>("list_income_sources");
+}
+
+const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+
+export function formatCents(cents: number): string {
+  return usd.format(cents / 100);
+}
+
+const dateFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+/** "2026-10-20" -> "Oct 20, 2026", independent of the viewer's time zone. */
+export function formatDate(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return dateFmt.format(new Date(y, m - 1, d));
+}
