@@ -1013,6 +1013,35 @@ async fn s_mcp_21_archive_and_restore_business() {
 }
 
 #[tokio::test]
+async fn s_mcp_27_business_replies_carry_the_stored_note_as_business_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let v = ok_json(&call(&client, "create_business", json!({ "name": "Test shop" })).await);
+    assert!(v["business_note"].is_null());
+    assert!(note(&v).starts_with("Created Test shop"), "{}", note(&v));
+
+    let v = ok_json(&call(&client, "update_business", json!({ "business": "Test shop", "note": "Scratch space" })).await);
+    assert_eq!(note(&v), "Updated Test shop: note set.");
+    assert_eq!(v["business_note"], "Scratch space");
+    for (tool, args) in [
+        ("switch_business", json!({ "business": "Test shop" })),
+        ("archive_business", json!({ "business": "Test shop" })),
+        ("restore_business", json!({ "business": "Test shop" })),
+        ("rename_business", json!({ "business": "Test shop", "name": "Trial shop" })),
+    ] {
+        let v = ok_json(&call(&client, tool, args).await);
+        assert_eq!(v["business_note"], "Scratch space", "{tool}");
+    }
+    let v = ok_json(&call(&client, "list_businesses", json!({})).await);
+    assert!(v["businesses"].as_array().unwrap().iter().any(|b| b["note"] == "Scratch space"));
+
+    let v = ok_json(&call(&client, "update_business", json!({ "business": "Trial shop", "clear_note": true })).await);
+    assert_eq!(note(&v), "Updated Trial shop: note cleared.");
+    assert!(v["business_note"].is_null());
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
 async fn s_mcp_22_recording_names_the_current_business() {
     let dir = tempfile::tempdir().unwrap();
     let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;

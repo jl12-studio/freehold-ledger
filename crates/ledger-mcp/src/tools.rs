@@ -664,6 +664,17 @@ fn business_json(b: &ledger_core::Business) -> Value {
     serde_json::to_value(b).expect("business serializes")
 }
 
+/// The reply object of a single-business tool: the business plus its stored note as `business_note`,
+/// because the top-level `note` is the reply sentence and would hide the stored one.
+fn business_reply(b: &ledger_core::Business, sentence: impl Into<String>) -> Value {
+    let mut v = business_json(b);
+    v["business_note"] = match &b.note {
+        Some(n) => Value::String(n.clone()),
+        None => Value::Null,
+    };
+    with_note(v, sentence)
+}
+
 /// Which business a call acts in: the one named, else the current one. A write refuses an archived business.
 fn scope(l: &Ledger, b: Option<BusinessArg>, write: bool) -> Result<ledger_core::Business, ToolError> {
     match b {
@@ -1474,7 +1485,7 @@ impl LedgerTools {
                     b.name, b.name
                 )
             };
-            Ok(with_note(business_json(&b), note))
+            Ok(business_reply(&b, note))
         })())
     }
 
@@ -1507,7 +1518,7 @@ impl LedgerTools {
             let key: ledger_core::BusinessKey = i.business.into();
             let b = self.with_ledger(|l| Ok(l.set_current_business(&key)?))?;
             let note = format!("New entries now go to {}.", biz_label(&b.name, b.is_test));
-            Ok(with_note(business_json(&b), note))
+            Ok(business_reply(&b, note))
         })())
     }
 
@@ -1529,7 +1540,7 @@ impl LedgerTools {
             } else {
                 format!("Renamed {old} to {}.", b.name)
             };
-            Ok(with_note(business_json(&b), note))
+            Ok(business_reply(&b, note))
         })())
     }
 
@@ -1578,7 +1589,7 @@ impl LedgerTools {
             } else {
                 format!("Updated {}: {}.", b.name, changed.join(", "))
             };
-            Ok(with_note(business_json(&b), note))
+            Ok(business_reply(&b, note))
         })())
     }
 
@@ -1599,7 +1610,7 @@ impl LedgerTools {
             if was_current {
                 note.push_str(" No business is current now: say which one to record in.");
             }
-            Ok(with_note(business_json(&b), note))
+            Ok(business_reply(&b, note))
         })())
     }
 
@@ -1612,7 +1623,7 @@ impl LedgerTools {
             let i: BusinessOnlyInput = parse_args(args)?;
             let key: ledger_core::BusinessKey = i.business.into();
             let b = self.with_ledger(|l| Ok(l.restore_business(&key)?))?;
-            Ok(with_note(business_json(&b), format!("Restored {}.", b.name)))
+            Ok(business_reply(&b, format!("Restored {}.", b.name)))
         })())
     }
 }

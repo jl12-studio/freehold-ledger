@@ -51,6 +51,13 @@ describe("Ledger table", () => {
     expect(wrapper.get("tbody tr td").classes()).toEqual(expect.arrayContaining(["pr-4", "whitespace-nowrap"]));
   });
 
+  it("category_and_paid_with_columns_are_wider_on_lg_so_most_names_show_in_full", async () => {
+    const wrapper = await launch();
+    const cols = wrapper.findAll("table colgroup col");
+    expect(cols[2].classes()).toEqual(expect.arrayContaining(["w-[10.5rem]", "lg:w-[14rem]"]));
+    expect(cols[3].classes()).toEqual(expect.arrayContaining(["w-[9.5rem]", "lg:w-[13rem]"]));
+  });
+
   it("s_ui_19_cells_expense_row", async () => {
     const wrapper = await launch();
     const cells = rowFor(wrapper, 1).findAll("td");
