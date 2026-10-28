@@ -1,0 +1,159 @@
+# Data Model
+
+This is the ledger in plain language: what is stored, what the rules are, and what happens to each fact when you say something like *"I bought a $300 device, add it to the books so it's ready when I file taxes."* If this document and the app ever disagree, that is a bug in the app.
+
+## 1. What you own
+
+Your books live in one SQLite file on your computer.
+
+- Default location (macOS): `~/Library/Application Support/org.freeholders.ledger/ledger.sqlite3`
+- Setting the `FREEHOLD_LEDGER_DB` environment variable points the app, the agent connection, and the tests at a different file instead.
+- You can copy it, back it up, or open it with any SQLite tool. It is a normal file that belongs to you.
+- Nothing leaves the computer. There is no account, no server, and no sync.
+
+The app and your agent's connection are two programs reading and writing the same file. Both are safe to use at the same time on one machine.
+
+## 2. A transaction
+
+A transaction is one thing that happened to the money of your business: one expense or one piece of income.
+
+| Field | In plain words |
+|---|---|
+| `id` | A number the ledger gives the entry. Never reused. |
+| `kind` | `expense` (money out) or `income` (money in). The kind carries the sign, so the amount is always positive. |
+| `occurred_on` | The date it happened, as `YYYY-MM-DD`, in your local time. If you do not say, it is today. |
+| `amount_cents` | The amount in whole cents (a $300 device is `30000`). Always greater than zero. US dollars only in v1. |
+| `description` | A short note saying what it was. Required. |
+| `category` | Which tax bucket it belongs to: a category key (section 3), which also fixes its Schedule C line. |
+| `is_asset` | Yes or no: is this equipment or property you keep longer than a year? Defaults to no. Only meaningful for expenses. |
+| income source | Income only: who paid you (section 4). Expenses have none. |
+| `recorded_at` | When the entry was written into the ledger, in UTC. Set by the ledger, not by you. |
+| `replaces_id` | Only on a correction: the id of the entry this one replaces. Empty otherwise. |
+
+Assets are listed separately in the export. The app does not compute depreciation; your agent and your tax preparer supply that knowledge.
+
+## 3. Categories
+
+Expense categories are the lines in Part II of IRS Schedule C (Form 1040), the form a US sole proprietor files. Using the same buckets means totals land on the right lines at tax time. Each has a stable key that never changes.
+
+| Key | Schedule C line | Label |
+|---|---|---|
+| `advertising` | 8 | Advertising |
+| `car_truck` | 9 | Car and truck expenses |
+| `commissions_fees` | 10 | Commissions and fees |
+| `contract_labor` | 11 | Contract labor |
+| `depreciation_section_179` | 13 | Depreciation and section 179 |
+| `employee_benefits` | 14 | Employee benefit programs |
+| `insurance` | 15 | Insurance (other than health) |
+| `interest_mortgage` | 16a | Interest: mortgage |
+| `interest_other` | 16b | Interest: other |
+| `legal_professional` | 17 | Legal and professional services |
+| `office_expense` | 18 | Office expense |
+| `pension_profit_sharing` | 19 | Pension and profit-sharing plans |
+| `rent_vehicles_equipment` | 20a | Rent or lease: vehicles, machinery, equipment |
+| `rent_other` | 20b | Rent or lease: other business property |
+| `repairs_maintenance` | 21 | Repairs and maintenance |
+| `supplies` | 22 | Supplies |
+| `taxes_licenses` | 23 | Taxes and licenses |
+| `travel` | 24a | Travel |
+| `meals` | 24b | Deductible meals |
+| `utilities` | 25 | Utilities |
+| `wages` | 26 | Wages |
+| `other_expense` | 27a | Other expenses |
+| `uncategorized` | none | Needs a category |
+
+Income categories:
+
+| Key | Schedule C line | Label |
+|---|---|---|
+| `gross_receipts` | 1 | Gross receipts or sales (the default for income) |
+| `other_income` | 6 | Other income |
+
+`uncategorized` is allowed when the right bucket is not yet known, but summaries and the export flag it so it gets fixed before you file.
+
+## 4. Income sources
+
+Income always comes from a named source, and each source is stored once. Names match without regard to capital letters: recording income from "upwork" reuses the existing "Upwork" instead of making a second one. Expenses have no source.
+
+## 5. Fixing mistakes (append-mostly)
+
+Nothing in the ledger is ever edited or deleted. A mistake is fixed by adding a record next to it, so the full history is always there. There are three moves.
+
+- **Void**: cancel an entry, with a reason. Example: you logged the same coffee twice, so you void the second one with the reason "duplicate".
+- **Correct**: void the original and add a replacement in one step. The replacement points back to the original through `replaces_id`. Example: see the $30.00 typo in section 9.
+- **Reclassify**: change only the category. The change is recorded with a reason, and the latest change wins as the entry's effective category; the original is kept. Example: a $45 charge filed under `supplies` is reclassified to `office_expense` with the reason "it was a desk lamp for the home office".
+
+Voided entries never count in any total, and they always stay visible in any listing that asks for them.
+
+## 6. Versions
+
+The file records its schema version. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
+
+## 7. What must never be lost
+
+- Every transaction
+- Every void and its reason
+- Every classification change
+- Every income source
+
+## 8. What the export will contain (coming in M4)
+
+Exporting a tax year writes a new folder named `Freehold Ledger <year> export/`, by default under `Documents/Freehold Ledger/exports/`. If that folder already exists, a ` (2)`, ` (3)` suffix is added; nothing is overwritten. Inside:
+
+- `transactions.csv`: every transaction for the year, with a header row.
+- `expenses-by-category.csv`: expense totals per category, with the Schedule C line.
+- `income-by-source.csv`: income totals per source.
+- `assets.csv`: the entries marked as assets, listed separately.
+- `corrections.csv`: voids, replacements, and category changes, with reasons.
+- `summary.json`: the same numbers the app's summary shows.
+- `README.txt`: a plain-language guide to every file and column.
+
+## 9. The scene, on paper
+
+### The device
+
+> "I bought a $300 device, add it to the books so it's ready when I file taxes."
+
+| Fact in the sentence | Where it lands |
+|---|---|
+| "bought" (money out) | `kind` = `expense` |
+| "$300" | `amount_cents` = `30000` |
+| "device" | `description` = "Device" |
+| (not stated, so now) | `occurred_on` = today |
+| "kept, ready for taxes" | `is_asset` = yes (kept longer than a year) |
+| "so it's ready when I file taxes" | `category`, chosen by the agent: `supplies` (line 22) or `depreciation_section_179` (line 13), depending on the treatment your preparer uses |
+| (set by the ledger) | `recorded_at` = the moment it was saved |
+
+Filled-in row: expense, today, 30000 cents, "Device", category `depreciation_section_179` (or `supplies`), asset yes, no source, no `replaces_id`.
+
+### An income
+
+> "I got $1,200 from Upwork for a website."
+
+| Fact | Where it lands |
+|---|---|
+| "got" (money in) | `kind` = `income` |
+| "$1,200" | `amount_cents` = `120000` |
+| "for a website" | `description` = "Website" |
+| "from Upwork" | income source = "Upwork" (reused if it exists) |
+| (default) | `category` = `gross_receipts` (line 1) |
+| (not stated) | `occurred_on` = today; `is_asset` = no |
+
+### A correction
+
+You typed $30.00 for the device, but it was $300.00.
+
+1. The original stays: expense, 3000 cents, "Device".
+2. The ledger voids it with the reason "typo, should be $300.00".
+3. In the same step it adds a replacement: expense, 30000 cents, "Device", with `replaces_id` set to the original's id.
+
+Totals now count only the $300.00 entry. Listings that ask for voided entries still show the $30.00 one and its reason.
+
+## 10. Not in v1
+
+- Multiple currencies (USD only)
+- Depreciation math
+- Invoicing
+- Payroll
+- Bank sync
+- Multiple users
