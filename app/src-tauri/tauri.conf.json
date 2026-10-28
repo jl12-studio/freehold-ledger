@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "org.freeholders.ledger",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "bash ../scripts/build-sidecar.sh && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "bash ../scripts/build-sidecar.sh && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -25,7 +25,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app"],
+    "externalBin": ["binaries/ledger-mcp"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

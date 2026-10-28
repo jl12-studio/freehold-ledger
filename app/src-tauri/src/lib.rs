@@ -30,6 +30,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::ledger_info,
@@ -37,7 +38,8 @@ pub fn run() {
             commands::list_categories,
             commands::list_income_sources,
             commands::ledger_years,
-            commands::export_tax_year
+            commands::export_tax_year,
+            commands::mcp_connection_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

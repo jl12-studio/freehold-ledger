@@ -113,3 +113,17 @@ export function formatDate(iso: string): string {
   if (!y || !m || !d) return iso;
   return dateFmt.format(new Date(y, m - 1, d));
 }
+
+export interface ConnectionInfo {
+  server_path: string;
+  bundled: boolean;
+  ledger_path: string;
+  ledger_path_overridden: boolean;
+  claude_desktop_json: string;
+  claude_code_command: string;
+  generic: string;
+}
+
+export function getConnectionInfo(): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>("mcp_connection_info");
+}

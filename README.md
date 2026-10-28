@@ -32,7 +32,7 @@ Stage 1 (local desktop, Mac first). Not released yet.
 
 ## Two guides
 
-Freehold apps carry two guides: one for the person (this README and `docs/HUMAN-GUIDE.md`, coming in M3) and one for their agent (`docs/AGENT-GUIDE.md`, coming in M3).
+Freehold apps carry two guides: one for the person ([`docs/HUMAN-GUIDE.md`](docs/HUMAN-GUIDE.md)) and one for their agent ([`docs/AGENT-GUIDE.md`](docs/AGENT-GUIDE.md)). The app's Connect your agent panel shows the exact settings to paste.
 
 ## Build from source
 
@@ -42,6 +42,15 @@ You need Rust, Node 24 and pnpm.
 pnpm --dir app install
 pnpm --dir app tauri dev
 ```
+
+To build the Mac app with the bundled MCP server:
+
+```bash
+scripts/build-sidecar.sh
+pnpm --dir app tauri build --bundles app
+```
+
+The app lands at `target/release/bundle/macos/Freehold Ledger.app`, with the MCP server at `Freehold Ledger.app/Contents/MacOS/ledger-mcp`. The build is local and unsigned. `scripts/check-no-listeners.sh` runs the built app and server against a scratch ledger and confirms neither opens a network socket.
 
 The app opens the ledger at its default location. To point it somewhere else (for example a scratch file while you try things out), set `FREEHOLD_LEDGER_DB` to a file path before launching. The same variable is honored by the app, the MCP server and the tests.
 

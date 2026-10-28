@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import ConnectAgentPanel from "./components/ConnectAgentPanel.vue";
 import AppHeader from "./components/AppHeader.vue";
 import EmptyState from "./components/EmptyState.vue";
 import ErrorState from "./components/ErrorState.vue";
@@ -85,6 +86,11 @@ async function goTo(id: number) {
   el?.focus();
 }
 
+const connectPanel = ref<InstanceType<typeof ConnectAgentPanel> | null>(null);
+function connect() {
+  void connectPanel.value?.open();
+}
+
 function reveal() {
   if (path.value) void revealLedger(path.value);
 }
@@ -123,13 +129,15 @@ onBeforeUnmount(() => clearTimeout(loadingTimer));
     :path="path"
     :show-export="state === 'ready' || state === 'empty'"
     @reveal="reveal"
+    @connect="connect"
   />
+  <ConnectAgentPanel ref="connectPanel" />
   <main>
     <p v-if="state === 'loading' && showLoading" class="max-w-measure mx-auto px-6 pt-16 text-ui text-muted">
       Opening your ledger…
     </p>
     <ErrorState v-else-if="state === 'error' && error" :error="error" @reveal="reveal" />
-    <EmptyState v-else-if="state === 'empty'" @reveal="reveal" />
+    <EmptyState v-else-if="state === 'empty'" @reveal="reveal" @connect="connect" />
     <section v-else-if="state === 'ready' && info" class="max-w-page mx-auto px-6 pt-8 pb-16">
       <p class="sr-only">Your ledger is open.</p>
       <LedgerFilters v-model="filters" :categories="categories" :sources="sources" @clear="clearFilters" />

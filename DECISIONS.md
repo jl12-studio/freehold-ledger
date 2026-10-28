@@ -16,6 +16,15 @@ Dated 2026-10-27. The repo lives at `/Users/marcus.salinas/Programming/Freehold 
 
 Dated 2026-10-27. All ledger data lives in one SQLite file. The default path is `ledger_core::default_db_path()`, which resolves to `dirs::data_dir()/org.freeholders.ledger/ledger.sqlite3` (on macOS, `~/Library/Application Support/org.freeholders.ledger/ledger.sqlite3`). The environment variable `FREEHOLD_LEDGER_DB` overrides that path everywhere: the app, the MCP server, and tests. Details are in `DATA-MODEL.md`.
 
+## Sidecar location
+
+Dated 2026-10-28. `ledger-mcp` ships as a Tauri sidecar (`bundle.externalBin: ["binaries/ledger-mcp"]`). `scripts/build-sidecar.sh` builds it in release and copies it to `app/src-tauri/binaries/ledger-mcp-<host triple>`; both `beforeDevCommand` and `beforeBuildCommand` run that script first. Tauri strips the triple suffix when it places the file, so the sidecar sits next to the app executable in both modes:
+
+- In the bundle: `Freehold Ledger.app/Contents/MacOS/ledger-mcp`, beside `freehold-ledger-app`. Observed in `target/release/bundle/macos/`.
+- In `tauri dev`: `target/debug/ledger-mcp`, beside `target/debug/freehold-ledger-app`. Observed: after `cargo build -p freehold-ledger-app`, `target/debug/ledger-mcp` is byte-identical to the release sidecar copy (tauri-build copies the externalBin there).
+
+So `std::env::current_exe()?.parent()/ledger-mcp` resolves in both. In dev it is the copy made at the last build, so rebuild (or rerun `tauri dev`) after changing `ledger-mcp`.
+
 ## Revisiting
 
 Dated 2026-10-27. Any decision here can be revisited. Write the new decision as a new dated section; do not rewrite history.

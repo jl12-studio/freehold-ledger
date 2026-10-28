@@ -183,6 +183,81 @@ pub fn export_tax_year(
     Ok(ExportResultDto { folder: r.folder.display().to_string(), files: r.files })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectionInfo {
+    pub server_path: String,
+    pub bundled: bool,
+    pub ledger_path: String,
+    pub ledger_path_overridden: bool,
+    pub claude_desktop_json: String,
+    pub claude_code_command: String,
+    pub generic: String,
+}
+
+/// Double-quote for a POSIX shell: the paths here may hold spaces, `$`, backticks or quotes.
+fn shell_quote(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        if matches!(c, '"' | '\\' | '$' | '`') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+fn build_connection_info(server: &Path, ledger: &Path, overridden: bool) -> ConnectionInfo {
+    let server_path = server.display().to_string();
+    let ledger_path = ledger.display().to_string();
+    let bundled = server_path.contains(".app/Contents/MacOS");
+
+    let mut entry = serde_json::json!({ "command": server_path });
+    if overridden {
+        entry["env"] = serde_json::json!({ "FREEHOLD_LEDGER_DB": ledger_path });
+    }
+    let claude_desktop_json = serde_json::to_string_pretty(
+        &serde_json::json!({ "mcpServers": { "freehold-ledger": entry } }),
+    )
+    .unwrap_or_default();
+
+    let env_flag = if overridden {
+        format!("-e FREEHOLD_LEDGER_DB={} ", shell_quote(&ledger_path))
+    } else {
+        String::new()
+    };
+    let claude_code_command = format!(
+        "claude mcp add freehold-ledger {env_flag}-- {}",
+        shell_quote(&server_path)
+    );
+    let generic = format!(
+        "Any MCP client that can launch a stdio server: command {server_path}, no arguments."
+    );
+    ConnectionInfo {
+        server_path,
+        bundled,
+        ledger_path,
+        ledger_path_overridden: overridden,
+        claude_desktop_json,
+        claude_code_command,
+        generic,
+    }
+}
+
+/// The exact settings a person pastes into their agent. Nothing is written anywhere.
+#[tauri::command]
+pub fn mcp_connection_info(state: State<'_, AppState>) -> Result<ConnectionInfo, AppError> {
+    let io = |e: std::io::Error| AppError {
+        kind: "io",
+        message: format!("Could not find this app's own location: {e}"),
+        path: state.path.display().to_string(),
+    };
+    let exe = std::env::current_exe().map_err(io)?;
+    let dir = exe.parent().ok_or_else(|| io(std::io::ErrorKind::NotFound.into()))?;
+    let overridden = std::env::var_os("FREEHOLD_LEDGER_DB").is_some_and(|v| !v.is_empty());
+    Ok(build_connection_info(&dir.join("ledger-mcp"), &state.path, overridden))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +292,37 @@ mod tests {
         assert!(err.message.contains("Nothing was changed."));
         assert_eq!(err.path, path.display().to_string());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn claude_code_command_quotes_a_bundle_path_with_spaces() {
+        let info = build_connection_info(
+            Path::new("/Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp"),
+            Path::new("/Users/pat/Ledger/l.sqlite3"),
+            false,
+        );
+        assert!(info.bundled);
+        assert_eq!(
+            info.claude_code_command,
+            "claude mcp add freehold-ledger -- \"/Applications/Freehold Ledger.app/Contents/MacOS/ledger-mcp\""
+        );
+        assert!(!info.claude_desktop_json.contains("FREEHOLD_LEDGER_DB"));
+    }
+
+    #[test]
+    fn override_adds_env_to_both_snippets_and_dev_build_is_not_bundled() {
+        let info = build_connection_info(
+            Path::new("/repo/target/debug/ledger-mcp"),
+            Path::new("/tmp/a b/l.sqlite3"),
+            true,
+        );
+        assert!(!info.bundled);
+        assert_eq!(
+            info.claude_code_command,
+            "claude mcp add freehold-ledger -e FREEHOLD_LEDGER_DB=\"/tmp/a b/l.sqlite3\" -- \"/repo/target/debug/ledger-mcp\""
+        );
+        let v: serde_json::Value = serde_json::from_str(&info.claude_desktop_json).unwrap();
+        assert_eq!(v["mcpServers"]["freehold-ledger"]["env"]["FREEHOLD_LEDGER_DB"], "/tmp/a b/l.sqlite3");
+        assert_eq!(v["mcpServers"]["freehold-ledger"]["command"], "/repo/target/debug/ledger-mcp");
     }
 }
