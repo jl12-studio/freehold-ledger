@@ -126,6 +126,17 @@ impl LedgerTools {
         refresh(&mut guard);
         out
     }
+
+    /// Refuse when a newer version opened the books, for a tool that does not read the ledger
+    /// (its answer may not match what the newer version keeps). Any other state lets it run.
+    fn refuse_if_newer(&self) -> Result<(), ToolError> {
+        let mut guard = self.ledger.lock().unwrap_or_else(|p| p.into_inner());
+        refresh(&mut guard);
+        match &*guard {
+            Books::Newer(n) => Err(ToolError::Newer(n.clone())),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// D30: refuse a full card or account number anywhere in a tool's input, before it is read,
@@ -940,6 +951,7 @@ impl LedgerTools {
     fn list_categories(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let input: ListCategoriesInput = parse_args(args)?;
+            self.refuse_if_newer()?;
             let kind: Option<ledger_core::Kind> = input.kind.map(Into::into);
             let cats: Vec<_> = ledger_core::categories()
                 .iter()

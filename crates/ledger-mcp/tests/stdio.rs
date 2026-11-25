@@ -1411,6 +1411,8 @@ async fn admin_newer_ledger_refuses_every_other_tool_and_the_file_is_untouched()
         ("summarize", json!({ "period": "this_month" })),
         ("backup_ledger", json!({})),
         ("verify_ledger", json!({})),
+        // Reads no ledger, yet the guides say only the four admin tools work in this state.
+        ("list_categories", json!({})),
     ] {
         let r = call(&client, tool, args).await;
         assert!(is_error(&r), "{tool}");
