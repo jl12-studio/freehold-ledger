@@ -29,14 +29,15 @@ fn data_model_lists_every_category_key() {
     }
 }
 
-const TOOLS: [&str; 25] = [
-    "archive_business", "assign_payment_method", "correct_transaction", "create_business",
-    "create_payment_method", "export_tax_year", "ledger_info", "list_businesses",
+const TOOLS: [&str; 29] = [
+    "archive_business", "assign_payment_method", "backup_ledger", "correct_transaction",
+    "create_business", "create_payment_method", "export_tax_year", "ledger_info", "list_backups",
+    "list_businesses",
     "list_categories", "list_payment_methods", "list_transactions", "reclassify_transaction",
     "record_expense", "record_income", "record_transactions", "rename_business",
-    "rename_payment_method", "restore_business", "retire_payment_method",
+    "rename_payment_method", "restore_business", "restore_ledger", "retire_payment_method",
     "set_default_payment_method", "summarize", "switch_business", "update_business",
-    "void_batch", "void_transaction",
+    "verify_ledger", "void_batch", "void_transaction",
 ];
 
 #[test]

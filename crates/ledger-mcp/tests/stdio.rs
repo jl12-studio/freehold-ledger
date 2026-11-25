@@ -52,14 +52,16 @@ fn ok_json(r: &CallToolResult) -> Value {
     serde_json::from_str(&text(r)).expect("success content is JSON text")
 }
 
-const TOOLS: [&str; 25] = [
+const TOOLS: [&str; 29] = [
     "archive_business",
     "assign_payment_method",
+    "backup_ledger",
     "correct_transaction",
     "create_business",
     "create_payment_method",
     "export_tax_year",
     "ledger_info",
+    "list_backups",
     "list_businesses",
     "list_categories",
     "list_payment_methods",
@@ -71,11 +73,13 @@ const TOOLS: [&str; 25] = [
     "rename_business",
     "rename_payment_method",
     "restore_business",
+    "restore_ledger",
     "retire_payment_method",
     "set_default_payment_method",
     "summarize",
     "switch_business",
     "update_business",
+    "verify_ledger",
     "void_batch",
     "void_transaction",
 ];
@@ -893,7 +897,7 @@ async fn s_mcp_17_business_tools_are_listed_with_schemas() {
     let dir = tempfile::tempdir().unwrap();
     let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 25);
+    assert_eq!(tools.len(), 29);
     let fields = |name: &str| -> Vec<String> {
         let t = tools.iter().find(|t| t.name == name).unwrap_or_else(|| panic!("{name} missing"));
         let mut f: Vec<String> = t
@@ -1166,5 +1170,162 @@ async fn s_mcp_26_payment_methods_and_export_follow_the_named_business() {
     let v = ok_json(&call(&client, "export_tax_year", json!({ "year": 2026, "destination": dest.path().to_str().unwrap(), "business": "Test shop" })).await);
     assert!(v["folder"].as_str().unwrap().ends_with("Freehold Ledger Test shop (test) 2026 export"), "{}", v["folder"]);
     assert!(note(&v).starts_with("In Test shop (test business): "), "{}", note(&v));
+    client.cancel().await.ok();
+}
+
+async fn expense(client: &Client, description: &str) {
+    ok_json(&call(client, "record_expense", json!({ "amount": "10", "description": description, "category": "supplies", "date": "2026-03-01" })).await);
+}
+
+async fn listed_descriptions(client: &Client) -> Vec<String> {
+    let v = ok_json(&call(client, "list_transactions", json!({})).await);
+    v["transactions"].as_array().unwrap().iter().map(|t| t["description"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn admin_backup_lands_beside_the_ledger_and_verifies() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("ledger.sqlite3");
+    let client = spawn_server(&db).await;
+    expense(&client, "First").await;
+
+    let v = ok_json(&call(&client, "backup_ledger", json!({})).await);
+    let path = std::path::PathBuf::from(v["path"].as_str().unwrap());
+    assert!(path.is_file());
+    assert_eq!(path.parent().unwrap(), dir.path().join("backups"));
+    assert_eq!(v["transaction_count"], 1);
+    assert!(v["bytes"].as_u64().unwrap() > 0);
+    assert!(v["schema_version"].is_number() && v["created_at"].is_string());
+    let n = note(&v);
+    assert!(n.starts_with(&format!("Your books were copied to {}.", path.display())), "{n}");
+    assert!(n.contains("USB drive"), "{n}");
+
+    let r = ok_json(&call(&client, "verify_ledger", json!({ "path": path.to_str().unwrap() })).await);
+    assert_eq!(r["ok"], true);
+    assert!(note(&r).starts_with("The books are intact: 1 entries in "), "{}", note(&r));
+
+    let own = ok_json(&call(&client, "verify_ledger", json!({})).await);
+    assert_eq!(own["ok"], true);
+
+    let l = ok_json(&call(&client, "list_backups", json!({})).await);
+    assert_eq!(l["backups"].as_array().unwrap().len(), 1);
+    assert_eq!(l["folder"], dir.path().join("backups").to_str().unwrap());
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_list_backups_empty_names_backup_ledger() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let v = ok_json(&call(&client, "list_backups", json!({})).await);
+    assert_eq!(v["backups"], json!([]));
+    assert!(note(&v).contains("backup_ledger"), "{}", note(&v));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_restore_goes_back_and_later_calls_read_restored_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    expense(&client, "Early one").await;
+    expense(&client, "Early two").await;
+    let b = ok_json(&call(&client, "backup_ledger", json!({})).await);
+    let backup = b["path"].as_str().unwrap().to_string();
+    expense(&client, "Late one").await;
+    expense(&client, "Late two").await;
+    assert_eq!(listed_descriptions(&client).await.len(), 4);
+
+    let v = ok_json(&call(&client, "restore_ledger", json!({ "path": backup, "reason": "went back to the morning backup" })).await);
+    assert_eq!(v["restored_from"], backup);
+    assert_eq!(v["transaction_count"], 2);
+    assert!(v["schema_version"].is_number());
+    let safety = std::path::PathBuf::from(v["safety_backup"]["path"].as_str().unwrap());
+    assert!(safety.is_file());
+    let n = note(&v);
+    assert!(n.contains("Your books are now as they were in") && n.contains(safety.to_str().unwrap()), "{n}");
+
+    // Same long-lived server connection reads the restored data.
+    let mut got = listed_descriptions(&client).await;
+    got.sort();
+    assert_eq!(got, vec!["Early one", "Early two"]);
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["transaction_count"], 2);
+    // And writes keep working afterwards.
+    expense(&client, "After restore").await;
+    assert_eq!(listed_descriptions(&client).await.len(), 3);
+
+    // The restore can be undone from the safety copy.
+    ok_json(&call(&client, "restore_ledger", json!({ "path": safety.to_str().unwrap(), "reason": "undo" })).await);
+    assert_eq!(listed_descriptions(&client).await.len(), 4);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_restore_refusals_change_nothing_and_server_keeps_serving() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    expense(&client, "Kept").await;
+    let b = ok_json(&call(&client, "backup_ledger", json!({})).await);
+    let backup = b["path"].as_str().unwrap().to_string();
+
+    let r = call(&client, "restore_ledger", json!({ "path": backup })).await;
+    assert!(is_error(&r));
+
+    let r = call(&client, "restore_ledger", json!({ "path": backup, "reason": "  " })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).ends_with("Nothing was changed."), "{}", text(&r));
+
+    let not_ledger = dir.path().join("notes.txt");
+    std::fs::write(&not_ledger, "just some words, not a database at all, long enough to look like a file").unwrap();
+    let r = call(&client, "restore_ledger", json!({ "path": not_ledger.to_str().unwrap(), "reason": "try" })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).ends_with("Nothing was changed."), "{}", text(&r));
+
+    let r = call(&client, "restore_ledger", json!({ "path": dir.path().join("missing.sqlite3").to_str().unwrap(), "reason": "try" })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).ends_with("Nothing was changed."), "{}", text(&r));
+
+    assert_eq!(listed_descriptions(&client).await, vec!["Kept"]);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_verify_of_a_non_ledger_is_a_plain_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let junk = dir.path().join("junk.sqlite3");
+    std::fs::write(&junk, "not a database, just text that is long enough to be a file header or so").unwrap();
+    let r = call(&client, "verify_ledger", json!({ "path": junk.to_str().unwrap() })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("Nothing was changed."), "{}", text(&r));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_full_number_guard_still_applies_to_path_and_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    for (tool, args) in [
+        ("backup_ledger", json!({ "folder": "/tmp/4111111111111111" })),
+        ("list_backups", json!({ "folder": "/tmp/4111111111111111" })),
+        ("verify_ledger", json!({ "path": "/tmp/4111111111111111.sqlite3" })),
+        ("restore_ledger", json!({ "path": "/tmp/4111111111111111.sqlite3", "reason": "x" })),
+    ] {
+        let r = call(&client, tool, args).await;
+        assert!(is_error(&r), "{tool}");
+        assert!(!text(&r).contains("4111111111111111"), "{tool}: {}", text(&r));
+    }
+    assert!(!dir.path().join("backups").exists());
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_ledger_info_reports_app_version_and_supported_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    let v = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(v["app_version"], ledger_core::app_version());
+    assert_eq!(v["app_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(v["supported_schema"], 4);
     client.cancel().await.ok();
 }

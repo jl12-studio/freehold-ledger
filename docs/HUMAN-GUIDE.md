@@ -12,7 +12,15 @@ The app shows the exact location at the bottom of its window, with a Show in Fin
 
 ## How to back it up
 
-Quit the app and your agent first. Then copy `ledger.sqlite3`, and any `ledger.sqlite3-wal` file next to it, to a safe place.
+Say: "back up my books". Your agent copies everything (all your businesses, entries and history) into a `backups` folder next to your ledger:
+
+`~/Library/Application Support/org.freeholders.ledger/backups/`
+
+It tells you the exact file. Keep a copy somewhere other than this computer too, such as a USB drive.
+
+To go back, say: "restore my books from the backup of <date>". Your agent saves what is there now first, so a restore can always be undone. Say "are my books okay?" any time to have them checked.
+
+If you would rather do it by hand, quit the app and your agent first. Then copy `ledger.sqlite3`, and any `ledger.sqlite3-wal` file next to it, to a safe place.
 
 If you are comfortable in Terminal, this makes a single clean copy:
 
@@ -58,6 +66,8 @@ A JSON settings file with an "mcpServers" section, used by many apps (merge this
 - "I paid $39 for my design software subscription on the first."
 - "What did I spend on software this quarter?"
 - "That coffee order was filed under supplies, put it under meals."
+- "Back up my books."
+- "Restore my books from the backup of <date>."
 
 ## How mistakes get fixed
 

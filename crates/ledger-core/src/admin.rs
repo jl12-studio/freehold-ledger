@@ -48,7 +48,7 @@ impl Ledger {
         std::fs::create_dir_all(&folder)?;
         let now = Local::now();
         let schema = self.verify()?.schema_version;
-        let stem = format!("ledger-{}-schema{schema}", now.format("%Y%m%d-%H%M%S"));
+        let stem = format!("ledger-{}-schema{schema}", now.format("%Y-%m-%d-%H%M%S"));
         let mut path = folder.join(format!("{stem}.sqlite3"));
         let mut n = 2;
         while path.exists() {

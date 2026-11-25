@@ -505,6 +505,36 @@ struct ExportInput {
     business: Option<BusinessArg>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BackupInput {
+    /// Full path of the folder to put the backup in. Omit for the backups folder beside the ledger.
+    folder: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct VerifyInput {
+    /// Full path of a backup file to check instead of the open ledger. Omit to check the open ledger.
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListBackupsInput {
+    /// Full path of the folder to look in. Omit for the backups folder beside the ledger.
+    folder: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RestoreInput {
+    /// Full path of the backup file to go back to (see list_backups).
+    path: String,
+    /// Short reason for going back, for example "the person asked to go back to yesterday's backup".
+    reason: String,
+}
+
 fn with_note(mut v: Value, note: impl Into<String>) -> Value {
     v["note"] = Value::String(note.into());
     v
@@ -802,6 +832,8 @@ impl LedgerTools {
             };
             let mut v = serde_json::to_value(info).expect("info serializes");
             v["businesses"] = Value::Array(list);
+            v["app_version"] = Value::String(ledger_core::app_version().to_string());
+            v["supported_schema"] = json!(ledger_core::SUPPORTED_SCHEMA);
             v["current_business"] = match &current {
                 Some(c) => json!({ "id": c.id, "name": c.name, "is_test": c.is_test }),
                 None => Value::Null,
@@ -1626,10 +1658,114 @@ impl LedgerTools {
             Ok(business_reply(&b, format!("Restored {}.", b.name)))
         })())
     }
+    #[tool(
+        description = "Copy the whole books (every business, entry and the history) to a backup file. Use it when the person asks to back up, and before an upgrade or a large import. Goes to the backups folder beside the ledger unless folder is given. It acts on the whole ledger file, not one business.",
+        input_schema = schema_for_input::<BackupInput>().expect("schema")
+    )]
+    fn backup_ledger(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: BackupInput = parse_args(args)?;
+            let folder = i.folder.as_deref().map(std::path::Path::new);
+            let b = self.with_ledger(|l| Ok(l.backup_to(folder)?))?;
+            let note = format!(
+                "Your books were copied to {}. This copy holds everything: all businesses, entries and history. Keep a copy somewhere other than this computer too, such as a USB drive.",
+                b.path.display()
+            );
+            Ok(with_note(serde_json::to_value(&b).expect("backup serializes"), note))
+        })())
+    }
+
+    #[tool(
+        description = "Check that the books are intact: the file's own integrity check, its file format and how many entries and businesses it holds. Use it when the person asks if the books are okay, and before relying on a backup. Give path to check a backup file instead of the open ledger. Changes nothing.",
+        input_schema = schema_for_input::<VerifyInput>().expect("schema"),
+        annotations(read_only_hint = true)
+    )]
+    fn verify_ledger(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: VerifyInput = parse_args(args)?;
+            let r = match i.path.as_deref() {
+                Some(p) => ledger_core::Ledger::verify_file(std::path::Path::new(p))?,
+                None => self.with_ledger(|l| Ok(l.verify()?))?,
+            };
+            let note = if r.ok {
+                format!(
+                    "The books are intact: {} entries in {} businesses, file format {}.",
+                    r.transaction_count, r.business_count, r.schema_version
+                )
+            } else {
+                let what = if r.problems.is_empty() {
+                    "the file has no recorded file format".to_string()
+                } else {
+                    r.problems.join("; ")
+                };
+                format!(
+                    "The books have problems: {what}. Do not record anything new. Restore the most recent good backup with restore_ledger."
+                )
+            };
+            Ok(with_note(serde_json::to_value(&r).expect("report serializes"), note))
+        })())
+    }
+
+    #[tool(
+        description = "List the backups that exist, newest first, with when each was made and how many entries it holds. Use it before restore_ledger, and to see whether a recent backup exists (suggest backup_ledger if the newest is more than 30 days old). Looks in the backups folder beside the ledger unless folder is given.",
+        input_schema = schema_for_input::<ListBackupsInput>().expect("schema"),
+        annotations(read_only_hint = true)
+    )]
+    fn list_backups(&self, args: JsonObject) -> CallToolResult {
+        respond((|| {
+            let i: ListBackupsInput = parse_args(args)?;
+            let folder = i.folder.as_deref().map(std::path::Path::new);
+            let (backups, shown) = self.with_ledger(|l| {
+                let shown = match folder {
+                    Some(f) => f.to_path_buf(),
+                    None => l
+                        .path()
+                        .parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .unwrap_or_else(|| std::path::Path::new("."))
+                        .join("backups"),
+                };
+                Ok((l.list_backups(folder)?, shown))
+            })?;
+            let n = backups.len();
+            let note = if n == 0 {
+                format!("There are no backups in {} yet; backup_ledger makes one.", shown.display())
+            } else {
+                format!("{n} backup{} in {}, newest first.", if n == 1 { "" } else { "s" }, shown.display())
+            };
+            Ok(with_note(json!({ "backups": backups, "folder": shown }), note))
+        })())
+    }
+
+    #[tool(
+        description = "Put the books back to a backup file. Use it only when the person asks to go back to a backup. It replaces all businesses' books with the backup's contents, after saving the current state first to a safety backup, so it can be undone by restoring that file. Needs a reason.",
+        input_schema = schema_for_input::<RestoreInput>().expect("schema")
+    )]
+    fn restore_ledger(&self, args: JsonObject) -> CallToolResult {
+        const SUFFIX: &str = "Nothing was changed.";
+        let plain = |m: String| ToolError::Input(if m.ends_with(SUFFIX) { m } else { format!("{m} {SUFFIX}") });
+        respond((|| {
+            let i: RestoreInput = parse_args(args).map_err(|e| match e {
+                ToolError::Input(m) => plain(m),
+                other => other,
+            })?;
+            if i.reason.trim().is_empty() {
+                return Err(plain("A reason is needed to restore a backup.".into()));
+            }
+            let r = self
+                .with_ledger(|l| l.restore_from(std::path::Path::new(&i.path)).map_err(|e| plain(e.to_string())))?;
+            let note = format!(
+                "Your books are now as they were in {}. What was there a moment ago is saved at {}, so this can be undone by restoring that file.",
+                r.restored_from.display(),
+                r.safety_backup.path.display()
+            );
+            Ok(with_note(serde_json::to_value(&r).expect("restore serializes"), note))
+        })())
+    }
 }
 
 #[tool_handler(
     name = "freehold-ledger",
-    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call. Payment methods (cards, bank accounts, cash) are kept by nickname and last 4 digits only: never ask for, repeat, or send a full card or account number, expiry date or security code. One ledger file can hold several businesses, for example the real books and a test business. Every recording, list, summary, payment method and export works in one business: the current one, unless you pass business. Switch with switch_business only when the person asks (\"switch to my test business\"), and always tell the person which business you recorded into. Create, rename, mark as test, archive and restore businesses by conversation; nothing is ever deleted."
+    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call. Payment methods (cards, bank accounts, cash) are kept by nickname and last 4 digits only: never ask for, repeat, or send a full card or account number, expiry date or security code. One ledger file can hold several businesses, for example the real books and a test business. Every recording, list, summary, payment method and export works in one business: the current one, unless you pass business. Switch with switch_business only when the person asks (\"switch to my test business\"), and always tell the person which business you recorded into. Create, rename, mark as test, archive and restore businesses by conversation; nothing is ever deleted. Before an upgrade or a large import, back up the books with backup_ledger; check them with verify_ledger; restore with restore_ledger only when the person asks."
 )]
 impl ServerHandler for LedgerTools {}

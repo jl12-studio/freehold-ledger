@@ -2,6 +2,18 @@
 
 A free bookkeeping app you own outright. Your agent keeps the books by conversation; the records live in one file on your computer.
 
+## Get it
+
+Tell your agent:
+
+```text
+Install Freehold Ledger for me. Follow https://github.com/jl12-studio/freehold-ledger/blob/main/INSTALL.md
+```
+
+Your agent downloads the app, checks it, installs it, connects itself and tells you where your ledger file is.
+
+No agent? Download the disk image: [Freehold-Ledger-universal.dmg](https://github.com/jl12-studio/freehold-ledger/releases/latest/download/Freehold-Ledger-universal.dmg).
+
 ## The scene
 
 *"I bought a $300 device, add it to the books so it's ready when I file taxes."*
@@ -19,8 +31,10 @@ Freehold Ledger follows the Freehold Standard. Read more at:
 The Standard points this app is built around:
 
 - Point 1: Free, and owned by the person.
+- Point 2: Deployable anywhere.
 - Point 3: Speaks MCP natively.
 - Point 5: A declared conflict story.
+- Point 6: Agent-operable administration.
 - Point 7: Secure by default.
 - Point 8: Self-carrying upgrades.
 - Point 9: Usable by conversation.
@@ -30,7 +44,7 @@ Check it yourself: [FREEHOLD.md](FREEHOLD.md) lists the ten points with their ev
 
 ## Status
 
-Stage 1 (local desktop, Mac first). Not released yet.
+Version 1.0.0. Mac (Apple Silicon and Intel). Desktop grade of the Freehold Standard: see FREEHOLD.md.
 
 ## Two guides
 
