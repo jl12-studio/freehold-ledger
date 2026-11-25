@@ -5,7 +5,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/target/release/bundle/macos/Freehold Ledger.app"
+APP="$ROOT/target/universal-apple-darwin/release/bundle/macos/Freehold Ledger.app"
+if [[ ! -d "$APP" ]]; then
+  APP="$ROOT/target/release/bundle/macos/Freehold Ledger.app"
+fi
 APP_BIN="$APP/Contents/MacOS/freehold-ledger-app"
 MCP_BIN="$APP/Contents/MacOS/ledger-mcp"
 

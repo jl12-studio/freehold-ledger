@@ -26,6 +26,8 @@ The Standard points this app is built around:
 - Point 9: Usable by conversation.
 - Point 10: Teaches while it works.
 
+Check it yourself: [FREEHOLD.md](FREEHOLD.md) lists the ten points with their evidence, and `bash scripts/freehold-check.sh` shows where each one stands.
+
 ## Status
 
 Stage 1 (local desktop, Mac first). Not released yet.
@@ -51,6 +53,10 @@ pnpm --dir app tauri build --bundles app
 ```
 
 The app lands at `target/release/bundle/macos/Freehold Ledger.app`, with the MCP server at `Freehold Ledger.app/Contents/MacOS/ledger-mcp`. The build is local and unsigned. `scripts/check-no-listeners.sh` runs the built app and server against a scratch ledger and confirms neither opens a network socket.
+
+To build the universal release disk image and checksums into `dist/release/`, run `FREEHOLD_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" scripts/release.sh`.
+Add `--notarize` to also notarize it with Apple (keychain profile in `FREEHOLD_NOTARY_PROFILE`, default `freehold-notary`).
+Add `--no-sign` instead for an unsigned build that needs no Apple developer account.
 
 The app opens the ledger at its default location. To point it somewhere else (for example a scratch file while you try things out), set `FREEHOLD_LEDGER_DB` to a file path before launching. The same variable is honored by the app, the MCP server and the tests.
 

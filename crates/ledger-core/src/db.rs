@@ -69,26 +69,7 @@ impl Ledger {
         conn.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()))?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // Re-read under the write lock: another process may have migrated or upgraded meanwhile.
-        let current = match probe(&tx) {
-            Ok(Probe::Empty) => 0,
-            Ok(Probe::Ledger(v)) => v,
-            Err(ProbeError::NotLedger) => return Err(not_a_ledger()),
-            Err(ProbeError::Sqlite(e)) => return Err(e.into()),
-        };
-        if current > SUPPORTED_SCHEMA {
-            return Err(LedgerError::NewerSchema { found: current, supported: SUPPORTED_SCHEMA });
-        }
-        for (version, sql) in MIGRATIONS.iter().filter(|(v, _)| *v > current) {
-            tx.execute_batch(sql)?;
-            tx.execute(
-                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1) \
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                [version.to_string()],
-            )?;
-        }
-        tx.commit()?;
+        migrate(&mut conn, path)?;
 
         Ok(Ledger { conn, path: path.to_path_buf() })
     }
@@ -135,6 +116,32 @@ impl Ledger {
     pub(crate) fn conn_mut(&mut self) -> &mut Connection {
         &mut self.conn
     }
+}
+
+/// Bring the database at `conn` up to `SUPPORTED_SCHEMA` in one BEGIN IMMEDIATE transaction.
+pub(crate) fn migrate(conn: &mut Connection, path: &Path) -> Result<(), LedgerError> {
+    let not_a_ledger = || LedgerError::NotALedger { path: path.to_path_buf() };
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // Re-read under the write lock: another process may have migrated or upgraded meanwhile.
+    let current = match probe(&tx) {
+        Ok(Probe::Empty) => 0,
+        Ok(Probe::Ledger(v)) => v,
+        Err(ProbeError::NotLedger) => return Err(not_a_ledger()),
+        Err(ProbeError::Sqlite(e)) => return Err(e.into()),
+    };
+    if current > SUPPORTED_SCHEMA {
+        return Err(LedgerError::NewerSchema { found: current, supported: SUPPORTED_SCHEMA });
+    }
+    for (version, sql) in MIGRATIONS.iter().filter(|(v, _)| *v > current) {
+        tx.execute_batch(sql)?;
+        tx.execute(
+            "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [version.to_string()],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 enum ProbeError {

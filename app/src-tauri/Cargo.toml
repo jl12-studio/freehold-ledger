@@ -1,6 +1,6 @@
 [package]
 name = "freehold-ledger-app"
-version = "0.1.0"
+version.workspace = true
 description = "Freehold Ledger desktop app"
 authors = ["Freeholders"]
 edition.workspace = true

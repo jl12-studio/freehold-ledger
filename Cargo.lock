@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "freehold-ledger-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ledger-core",
  "serde",
@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "ledger-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "csv",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "ledger-mcp"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "chrono",

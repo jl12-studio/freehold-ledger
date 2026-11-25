@@ -10,7 +10,7 @@ Dated 2026-10-27. The app is free and owned by the person who uses it. The netwo
 
 ## Repo: its own home
 
-Dated 2026-10-27. The repo lives at `/Users/marcus.salinas/Programming/Freehold Apps/freehold-ledger`, is its own git repo on local `main`, and has no remote. Apps never live in the freehold repo.
+Dated 2026-10-27. The repo lives at `~/Programming/Freehold Apps/freehold-ledger`, is its own git repo on local `main`, and has no remote. Apps never live in the freehold repo.
 
 ## Data: one SQLite file the person owns
 

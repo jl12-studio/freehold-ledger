@@ -14,6 +14,8 @@ pub enum LedgerError {
     NotALedger { path: PathBuf },
     #[error("This ledger was created by a newer Freehold Ledger (schema {found}); this app supports up to schema {supported}. Update the app to open it. Nothing was changed.")]
     NewerSchema { found: u32, supported: u32 },
+    #[error("That backup cannot be restored: {reason} Nothing was changed.")]
+    RestoreRefused { reason: String },
     #[error("Amount must be more than $0.00.")]
     InvalidAmount(i64),
     #[error("\"{key}\" is not a {} category. Valid categories: {}.", kind.as_str(), valid_keys(*kind).join(", "))]

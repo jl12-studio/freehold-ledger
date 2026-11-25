@@ -1,4 +1,5 @@
 //! Pure library that owns the Freehold Ledger SQLite file.
+mod admin;
 mod businesses;
 mod categories;
 mod db;
@@ -13,7 +14,14 @@ mod seed;
 mod summary;
 
 pub use db::{default_db_path, resolve_db_path, Ledger, LedgerInfo, SUPPORTED_SCHEMA};
+pub use admin::{BackupInfo, RestoreInfo, VerifyReport};
 pub use error::LedgerError;
+
+/// The version of this build, for the agent to report.
+pub fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 pub use categories::{categories, category, Category};
 pub use model::{
     Assignment, BatchEntry, BatchResult, BatchVoid, ClassificationChange, Correction, Filter, Kind, Business, BusinessKey, NewBatch, NewBusiness, NewEntry,

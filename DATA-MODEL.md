@@ -82,7 +82,7 @@ Income always comes from a named source, and each source is stored once. Names m
 Nothing in the ledger is ever edited or deleted. A mistake is fixed by adding a record next to it, so the full history is always there. There are three moves.
 
 - **Void**: cancel an entry, with a reason. Example: you logged the same coffee twice, so you void the second one with the reason "duplicate".
-- **Correct**: void the original and add a replacement in one step. The replacement points back to the original through `replaces_id`. Example: see the $30.00 typo in section 9.
+- **Correct**: void the original and add a replacement in one step. The replacement points back to the original through `replaces_id`. Example: see the $30.00 typo in section 10.
 - **Reclassify**: change only the category. The change is recorded with a reason, and the latest change wins as the entry's effective category; the original is kept. Example: a $45 charge filed under `supplies` is reclassified to `office_expense` with the reason "it was a desk lamp for the home office".
 
 Voided entries never count in any total, and they always stay visible in any listing that asks for them.
@@ -132,11 +132,15 @@ One ledger file can hold several businesses, for example the real books and a te
 - When a schema 3 file is upgraded, every existing entry, batch and payment method moves into one business named "My business", which becomes current. The older `default_payment_method_changes` table is kept as history.
 - All seven tables are append-only, like the rest of the ledger.
 
-## 6. Versions
+## 6. Conflict story
+
+The ledger is one file on one computer. The app window and the agent's `ledger-mcp` share it safely through SQLite (write-ahead log, 5 second busy timeout). There is no offline editing on a second device at this grade, so there is nothing to merge. A copy of the file is an independent ledger. Every table is append-only, which is what will make merging simple when the Cloud grade adds sync.
+
+## 7. Versions
 
 The file is now schema 4; files from schema 1, 2 or 3 upgrade automatically when opened. A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
 
-## 7. What must never be lost
+## 8. What must never be lost
 
 - Every transaction
 - Every void and its reason
@@ -150,7 +154,7 @@ The file is now schema 4; files from schema 1, 2 or 3 upgrade automatically when
 - Every change of current business
 - Which business each entry, batch and payment method belongs to
 
-## 8. What the export will contain (coming in M4)
+## 9. What the export will contain (coming in M4)
 
 Exporting a tax year writes one business's books to a new folder named `Freehold Ledger <business> <year> export/` (or Freehold Ledger <business> (test) <year> export/ for a test business), by default under `Documents/Freehold Ledger/exports/`. If that folder already exists, a ` (2)`, ` (3)` suffix is added; nothing is overwritten. Inside:
 
@@ -162,7 +166,7 @@ Exporting a tax year writes one business's books to a new folder named `Freehold
 - `summary.json`: the same numbers the app's summary shows.
 - `README.txt`: a plain-language guide to every file and column.
 
-## 9. The scene, on paper
+## 10. The scene, on paper
 
 ### The device
 
@@ -203,7 +207,7 @@ You typed $30.00 for the device, but it was $300.00.
 
 Totals now count only the $300.00 entry. Listings that ask for voided entries still show the $30.00 one and its reason.
 
-## 10. Not in v1
+## 11. Not in v1
 
 - Multiple currencies (USD only)
 - Depreciation math

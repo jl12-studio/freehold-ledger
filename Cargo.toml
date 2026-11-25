@@ -5,4 +5,4 @@ members = ["crates/ledger-core", "crates/ledger-mcp", "app/src-tauri"]
 [workspace.package]
 edition = "2021"
 license = "AGPL-3.0-or-later"
-version = "0.1.0"
+version = "1.0.0"
