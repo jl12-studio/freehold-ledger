@@ -4,9 +4,12 @@ import { exportTaxYear, listLedgerYears, revealFolder } from "../lib/api";
 import type { AppError } from "../lib/api";
 
 const props = defineProps<{ businessId: number; businessName: string }>();
+/** The chosen tax year, so the year summary and Schedule C tally follow it. */
+const emit = defineEmits<{ year: [year: number] }>();
 
 const years = ref<number[]>([new Date().getFullYear()]);
 const year = ref<number>(years.value[0]);
+watch(year, (y) => emit("year", Number(y)), { immediate: true });
 const working = ref(false);
 const outcome = ref<{ ok: true; year: number; folder: string; business: string } | { ok: false; message: string } | null>(null);
 

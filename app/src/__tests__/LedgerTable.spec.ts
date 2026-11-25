@@ -27,52 +27,77 @@ describe("Ledger table", () => {
     document.body.innerHTML = "";
   });
 
-  it("s_ui_18_five_columns_single_line_rows", async () => {
+  it("six_columns_with_split_paid_out_and_received", async () => {
     const wrapper = await launch();
     await wrapper.get("input[type='checkbox']").setValue(true);
     await flushPromises();
     expect(wrapper.get("table caption").text()).toBe("Ledger entries");
     expect(wrapper.findAll("th[scope='col']").map((h) => h.text())).toEqual([
-      "Date", "Description", "Category", "Paid with", "Amount",
+      "Day", "Description", "Category", "Paid with", "Paid out", "Received",
     ]);
     const rows = wrapper.findAll("tbody tr[id^='tx-']");
     expect(rows).toHaveLength(10);
     expect(rows[0].text()).toContain("Laptop for client work");
     expect(rows[9].text()).toContain("Booth rent, winter market");
-    for (const r of rows) expect(r.findAll("td")).toHaveLength(5);
-    expect(wrapper.get("table").classes()).toEqual(expect.arrayContaining(["table-fixed", "min-w-[42rem]"]));
+    for (const r of rows) expect(r.findAll("td")).toHaveLength(6);
+    expect(wrapper.get("table").classes()).toEqual(expect.arrayContaining(["table-fixed", "min-w-[44rem]"]));
   });
 
-  it("date_column_is_wide_enough_for_its_text_plus_the_cell_padding", async () => {
+  it("entries_are_grouped_by_month_with_month_totals", async () => {
     const wrapper = await launch();
-    const cols = wrapper.findAll("table colgroup col");
-    expect(cols).toHaveLength(5);
-    expect(cols[0].classes()).toContain("w-[7.75rem]");
-    expect(wrapper.get("tbody tr td").classes()).toEqual(expect.arrayContaining(["pr-4", "whitespace-nowrap"]));
+    const groups = wrapper.findAll("tbody[data-month]");
+    const heading = (g: (typeof groups)[number]) => {
+      const name = g.get("th[scope='rowgroup'] span.font-serif");
+      return `${name.element.firstChild!.textContent!.trim()} ${name.get("span").text()}`;
+    };
+    expect(groups.map(heading)).toEqual([
+      "October 2026", "September 2026", "August 2026", "July 2026", "June 2026", "May 2026", "December 2025",
+    ]);
+    const october = groups[0];
+    expect(october.findAll("tr[id^='tx-']").map((r) => r.attributes("id"))).toEqual(["tx-1", "tx-2"]);
+    expect(october.get("[data-testid='month-totals']").text()).toBe("out $300.00 · in $1,200.00");
+    expect(groups[1].get("[data-testid='month-totals']").text()).toBe("out $25.00");
+    expect(groups[2].get("[data-testid='month-totals']").text()).toBe("in $85.00");
   });
 
-  it("category_and_paid_with_columns_are_wider_on_lg_so_most_names_show_in_full", async () => {
+  it("month_totals_leave_out_voided_entries", async () => {
+    const wrapper = await launch();
+    await wrapper.get("input[type='checkbox']").setValue(true);
+    await flushPromises();
+    const june = wrapper.findAll("tbody[data-month]").find((g) => g.text().includes("June"))!;
+    expect(june.findAll("tr[id^='tx-']")).toHaveLength(2);
+    expect(june.get("[data-testid='month-totals']").text()).toBe("out $19.99");
+  });
+
+  it("column_widths_fit_the_day_and_two_amount_columns", async () => {
     const wrapper = await launch();
     const cols = wrapper.findAll("table colgroup col");
-    expect(cols[2].classes()).toEqual(expect.arrayContaining(["w-[10.5rem]", "lg:w-[14rem]"]));
-    expect(cols[3].classes()).toEqual(expect.arrayContaining(["w-[9.5rem]", "lg:w-[13rem]"]));
+    expect(cols).toHaveLength(6);
+    expect(cols[0].classes()).toContain("w-[4.25rem]");
+    expect(cols[2].classes()).toEqual(expect.arrayContaining(["w-[11rem]", "lg:w-[13rem]"]));
+    expect(cols[3].classes()).toEqual(expect.arrayContaining(["w-[9.5rem]", "lg:w-[11rem]"]));
+    expect(cols[4].classes()).toContain("w-[6.75rem]");
+    expect(cols[5].classes()).toContain("w-[6.75rem]");
   });
 
   it("s_ui_19_cells_expense_row", async () => {
     const wrapper = await launch();
     const cells = rowFor(wrapper, 1).findAll("td");
-    expect(cells[0].text()).toBe("Oct 20, 2026");
+    expect(cells[0].get(".sr-only").text()).toBe("Oct 20, 2026");
+    expect(cells[0].get("[aria-hidden='true']").findAll("span").map((x) => x.text())).toEqual(["20", "Tue"]);
     expect(cells[1].text()).toContain("Laptop for client work");
     expect(cells[1].get(".chip").text()).toBe("Asset");
     expect(cells[2].text()).toContain("Supplies");
-    expect(cells[2].text()).toContain("line 22");
+    expect(cells[2].get(".line-tag").text()).toBe("Schedule C line L22");
+    expect(cells[2].get(".line-tag").attributes("title")).toBe("Schedule C line 22");
     expect(cells[3].text()).toContain("Business Visa");
     expect(cells[3].get(".sr-only").text()).toContain("ending");
     expect(cells[3].get("[aria-hidden='true']").text()).toBe("\u00b7\u00b7");
     expect(cells[3].text()).toContain("\u00b7\u00b74242");
-    expect(cells[4].text()).toBe("Expense$300.00");
-    expect(cells[4].get(".sr-only").text()).toBe("Expense");
+    expect(cells[4].text()).toBe("Paid out $300.00");
     expect(cells[4].classes()).toEqual(expect.arrayContaining(["text-right", "tabular-nums"]));
+    expect(cells[5].text()).toBe("\u00b7");
+    expect(cells[5].get("span").attributes("aria-hidden")).toBe("true");
   });
 
   it("s_ui_19_cells_income_row", async () => {
@@ -80,9 +105,9 @@ describe("Ledger table", () => {
     const cells = rowFor(wrapper, 2).findAll("td");
     expect(cells[1].text()).toContain("Website build");
     expect(cells[1].text()).toContain("from Upwork");
-    expect(cells[4].text()).toBe("Income+$1,200.00");
-    expect(cells[4].get(".sr-only").text()).toBe("Income");
-    expect(cells[4].classes()).toContain("text-income");
+    expect(cells[4].text()).toBe("\u00b7");
+    expect(cells[5].text()).toBe("Received $1,200.00");
+    expect(cells[5].classes()).toContain("text-income");
   });
 
   it("s_ui_19_paid_with_retired_and_not_set", async () => {
@@ -105,7 +130,7 @@ describe("Ledger table", () => {
     expect(cells[1].text()).toContain("Voided");
     expect(cells[1].get(".line-through").text()).toContain("Domain renewal");
     expect(cells[4].classes()).toContain("line-through");
-    expect(cells[4].classes()).not.toContain("text-income");
+    expect(cells[5].classes()).not.toContain("text-income");
     const trail = wrapper.get("#trail-6");
     expect(trail.text()).toMatch(/^Voided [A-Z][a-z]{2} \d{1,2}, \d{4}: Duplicate entry$/);
     expect(voided.attributes("aria-describedby")).toBe("trail-6");
@@ -184,6 +209,6 @@ describe("Ledger table", () => {
     const row = { ...seedTransactions[4], category: "uncategorized", category_label: "Needs a category", schedule_c_line: null, classification_history: [] };
     const wrapper = mount(LedgerTable, { props: { rows: [row], categories } });
     expect(wrapper.text()).toContain("Needs a category");
-    expect(wrapper.text()).not.toContain("line ");
+    expect(wrapper.find(".line-tag").exists()).toBe(false);
   });
 });

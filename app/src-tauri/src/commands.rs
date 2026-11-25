@@ -203,6 +203,28 @@ pub fn ledger_years(state: State<'_, AppState>, business_id: i64) -> Result<Vec<
     Ok(years)
 }
 
+fn year_filter(business_id: i64, year: i32) -> FilterDto {
+    FilterDto {
+        from: Some(format!("{year:04}-01-01")),
+        to: Some(format!("{year:04}-12-31")),
+        business_id: Some(business_id),
+        include_voided: false,
+        ..Default::default()
+    }
+}
+
+/// One business's live entries (voided left out) dated in one tax year, for the year summary
+/// and the Schedule C tally. Independent of the table's filters.
+#[tauri::command]
+pub fn year_entries(
+    state: State<'_, AppState>,
+    business_id: i64,
+    year: i32,
+) -> Result<Vec<Transaction>, AppError> {
+    let f = year_filter(business_id, year).to_filter().map_err(|e| AppError::from_ledger(&e, &state.path))?;
+    with_ledger(&state, |l| l.list(&f))
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportResultDto {
     pub folder: String,
@@ -390,6 +412,16 @@ mod tests {
         assert_eq!(l.list(&one).unwrap().len(), 10);
         drop(l);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn year_filter_covers_the_calendar_year_live_entries_only() {
+        let f = year_filter(3, 2026).to_filter().unwrap();
+        assert_eq!(f.from.unwrap().to_string(), "2026-01-01");
+        assert_eq!(f.to.unwrap().to_string(), "2026-12-31");
+        assert_eq!(f.business_id, Some(3));
+        assert!(!f.include_voided);
+        assert!(f.kind.is_none() && f.category.is_none() && f.payment_method.is_none());
     }
 
     #[test]

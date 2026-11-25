@@ -9,9 +9,10 @@ const active = computed(() => props.businesses.filter((b) => !b.archived));
 const archived = computed(() => props.businesses.filter((b) => b.archived));
 const selected = computed(() => props.businesses.find((b) => b.id === props.modelValue) ?? null);
 const current = computed(() => props.businesses.find((b) => b.id === props.currentId) ?? null);
+const recordsHere = computed(() => props.currentId !== null && props.currentId === props.modelValue);
 
 const caption = computed(() => {
-  if (props.currentId !== null && props.currentId === props.modelValue) return "Your agent records here";
+  if (recordsHere.value) return "Your agent records here";
   if (current.value) return `Your agent records in ${current.value.name}`;
   return "No business is current for your agent";
 });
@@ -24,12 +25,13 @@ function onChange(e: Event) {
 </script>
 
 <template>
-  <div class="flex min-w-0 items-center gap-2">
-    <label class="label" for="business-select">Business</label>
+  <div class="flex min-w-0 items-baseline gap-2">
+    <span class="hidden font-serif text-[1.375rem] leading-none text-rule lg:inline" aria-hidden="true">/</span>
+    <label class="sr-only" for="business-select">Business</label>
     <select
       v-if="businesses.length > 1"
       id="business-select"
-      class="control max-w-[16rem] font-[560]"
+      class="book-select max-w-[16rem]"
       :value="modelValue"
       @change="onChange"
     >
@@ -38,9 +40,12 @@ function onChange(e: Event) {
         <option v-for="b in archived" :key="b.id" :value="b.id" :selected="b.id === modelValue">{{ optionText(b) }}</option>
       </optgroup>
     </select>
-    <span v-else class="font-[560]">{{ selected?.name }}</span>
-    <span v-if="selected?.is_test" class="chip chip-test">Test</span>
-    <span v-if="selected?.archived" class="chip chip-muted">Archived</span>
-    <span class="label hidden truncate md:inline" :title="caption">{{ caption }}</span>
+    <span v-else class="font-serif text-[1.1875rem] font-[450] italic">{{ selected?.name }}</span>
+    <span v-if="selected?.is_test" class="chip chip-test self-center">Test</span>
+    <span v-if="selected?.archived" class="chip chip-muted self-center">Archived</span>
+    <span
+      :class="['label hidden truncate md:inline', recordsHere ? 'agent-here' : '']"
+      :title="caption"
+    >{{ caption }}</span>
   </div>
 </template>

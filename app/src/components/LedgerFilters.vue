@@ -26,8 +26,8 @@ const periods: { value: Period; label: string }[] = [
 ];
 const kinds = [
   { value: "", label: "All" },
-  { value: "expense", label: "Expenses" },
-  { value: "income", label: "Income" },
+  { value: "expense", label: "Paid out" },
+  { value: "income", label: "Received" },
 ];
 
 const expenseCats = computed(() => props.categories.filter((c) => c.kind === "expense"));
@@ -78,7 +78,7 @@ const active = (v: string) => (v !== "" ? "true" : undefined);
 </script>
 
 <template>
-  <form role="search" aria-label="Filter entries" class="flex flex-wrap items-center gap-2 pb-4" @submit.prevent>
+  <form role="search" aria-label="Filter entries" class="ledger-toolbar flex flex-wrap items-center gap-2" @submit.prevent>
     <select
       aria-label="Dates"
       class="control"

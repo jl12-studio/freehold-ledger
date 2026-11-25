@@ -11,13 +11,13 @@ const props = defineProps<{
   selectedId: number | null;
   currentId: number | null;
 }>();
-defineEmits<{ connect: []; select: [id: number] }>();
+defineEmits<{ connect: []; select: [id: number]; year: [year: number] }>();
 
 const selected = computed(() => props.businesses.find((b) => b.id === props.selectedId) ?? null);
 </script>
 
 <template>
-  <header class="sticky top-0 z-20 border-b border-rule bg-bg">
+  <header class="sticky top-0 z-20 border-b border-rule bg-bg/90 backdrop-blur-md">
     <div
       class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-3 px-6 py-3 lg:gap-x-4 xl:gap-x-6 lg:grid-cols-[auto_minmax(0,1fr)_auto_auto]"
     >
@@ -33,7 +33,12 @@ const selected = computed(() => props.businesses.find((b) => b.id === props.sele
         :current-id="currentId"
         @update:model-value="$emit('select', $event)"
       />
-      <ExportControl v-if="showExport && selected" :business-id="selected.id" :business-name="selected.name" />
+      <ExportControl
+        v-if="showExport && selected"
+        :business-id="selected.id"
+        :business-name="selected.name"
+        @year="$emit('year', $event)"
+      />
       <button
         type="button"
         class="btn btn-primary col-start-2 row-start-1 lg:col-start-4"

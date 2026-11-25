@@ -40,6 +40,7 @@ pub fn run() {
             commands::list_payment_methods,
             commands::list_businesses,
             commands::ledger_years,
+            commands::year_entries,
             commands::export_tax_year,
             commands::mcp_connection_info
         ])

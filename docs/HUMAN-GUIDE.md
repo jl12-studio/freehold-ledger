@@ -92,6 +92,18 @@ Things to say:
 
 Each business has its own entries, cards and accounts, and its own year-end export. A test business is marked Test in the app, and its export folder says test.
 
+## Reading the window
+
+The window reads like an account book. It never changes your entries; only your agent records.
+
+- **The year at the top.** Your net for the tax year (money received minus money paid out), with both totals beside it. The small chart shows each month: money received rises above the line, money paid out hangs below it. Point at a month to see its totals, and click it to list only that month's entries (click it again to go back to all dates). Months that have not happened yet are faded.
+- **The tax year menu** next to Export picks which year the top of the window and the Schedule C box show, and which year Export writes.
+- **Entries by month.** Each month has its heading with its own totals. Each entry shows the day, what it was, its category with its Schedule C line (for example L22), what paid for it, and the amount in either the Paid out or the Received column.
+- **The Schedule C box** adds up the year's entries by Schedule C line, with total expenses at the bottom. Its expense totals match the expenses-by-category file in the year-end export. It shows beside the entries on a wide window and below them on a narrow one.
+- **Notes under an entry** (marked with ↳) explain what changed: a voided entry, a correction, or a category change. Click "Corrects #7" or "Corrected by #8" to jump between the two.
+
+Voided entries are left out of every total. The filters (dates, Paid out or Received, category, payment method) only change the list of entries; the year at the top and the Schedule C box always cover the whole tax year.
+
 ## What the year-end export gives your preparer
 
 Press Export in the app (or ask your agent for your books for the year). It creates a folder for the business you are looking at, such as "Freehold Ledger My business 2026 export" (with the year you chose) in Documents/Freehold Ledger/exports. Inside:

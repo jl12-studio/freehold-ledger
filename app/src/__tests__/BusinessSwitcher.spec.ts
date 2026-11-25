@@ -134,6 +134,7 @@ describe("Business switcher in the window", () => {
       "list_payment_methods",
       "list_transactions",
       "ledger_years",
+      "year_entries",
       "export_tax_year",
       "mcp_connection_info",
     ]);

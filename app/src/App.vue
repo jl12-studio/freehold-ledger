@@ -7,6 +7,8 @@ import EmptyState from "./components/EmptyState.vue";
 import ErrorState from "./components/ErrorState.vue";
 import LedgerFilters from "./components/LedgerFilters.vue";
 import LedgerTable from "./components/LedgerTable.vue";
+import ScheduleCTally from "./components/ScheduleCTally.vue";
+import YearSummary from "./components/YearSummary.vue";
 import {
   getLedgerInfo,
   listBusinesses,
@@ -14,12 +16,14 @@ import {
   listIncomeSources,
   listPaymentMethods,
   listTransactions,
+  listYearEntries,
   revealLedger,
 } from "./lib/api";
 import type { AppError, Business, Category, LedgerInfo, PaymentMethod, Transaction } from "./lib/api";
 import { DEFAULT_FILTERS, isDirty, toFilter } from "./lib/filters";
 import type { FilterState } from "./lib/filters";
 import { loadViewBusiness, pickBusiness, saveViewBusiness } from "./lib/businessView";
+import { monthRange } from "./lib/ledgerMath";
 
 const info = ref<LedgerInfo | null>(null);
 const error = ref<AppError | null>(null);
@@ -79,6 +83,47 @@ async function fetchRows() {
   }
 }
 
+// The year band and Schedule C tally read the chosen tax year's live entries, whatever the filters say.
+const taxYear = ref(new Date().getFullYear());
+const yearRows = ref<Transaction[] | null>(null);
+let yearToken = 0;
+async function loadYear() {
+  const token = ++yearToken;
+  const id = selectedId.value;
+  if (id === null) return;
+  try {
+    const result = await listYearEntries(id, taxYear.value);
+    if (token === yearToken) yearRows.value = result;
+  } catch {
+    // The ledger itself still shows; only the summary is left out.
+    if (token === yearToken) yearRows.value = null;
+  }
+}
+function setTaxYear(y: number) {
+  if (y === taxYear.value) return;
+  taxYear.value = y;
+  void loadYear();
+}
+
+/** The chart month the date filter is set to exactly, if any. */
+const chartMonth = computed<number | null>(() => {
+  const f = filters.value;
+  if (f.period !== "custom") return null;
+  for (let m = 0; m < 12; m++) {
+    const r = monthRange(taxYear.value, m);
+    if (f.from === r.from && f.to === r.to) return m;
+  }
+  return null;
+});
+
+/** Clicking a chart month shows that month's entries; clicking it again goes back to all dates. */
+function showMonth(month: number) {
+  filters.value =
+    chartMonth.value === month
+      ? { ...filters.value, period: "", from: "", to: "" }
+      : { ...filters.value, period: "custom", ...monthRange(taxYear.value, month) };
+}
+
 let optionsToken = 0;
 /** The business's own filter options. A reply for a business that is no longer selected is dropped. */
 async function loadOptions(id: number) {
@@ -93,6 +138,7 @@ async function selectBusiness(id: number) {
   if (id === selectedId.value || !path.value) return;
   selectedId.value = id;
   saveViewBusiness(path.value, id);
+  void loadYear();
   // Rows are refetched by the filters watcher (always a new object here).
   filters.value = { ...filters.value, source: "", payment_method: "" };
   try {
@@ -149,7 +195,7 @@ onMounted(async () => {
     selectedId.value = pick?.id ?? null;
     info.value = opened;
     if (pick) {
-      const [cats] = await Promise.all([listCategories(), loadOptions(pick.id)]);
+      const [cats] = await Promise.all([listCategories(), loadOptions(pick.id), loadYear()]);
       categories.value = cats;
       await refetch();
     }
@@ -175,6 +221,7 @@ onBeforeUnmount(() => clearTimeout(loadingTimer));
     :current-id="info?.current_business_id ?? null"
     @select="selectBusiness"
     @connect="connect"
+    @year="setTaxYear"
   />
   <ConnectAgentPanel ref="connectPanel" />
   <main class="flex-1">
@@ -188,20 +235,26 @@ onBeforeUnmount(() => clearTimeout(loadingTimer));
       :current-name="currentName"
       :is-current="selected !== null && selected.id === info?.current_business_id"
       @reveal="reveal" @connect="connect" />
-    <section v-else-if="state === 'ready' && info" class="mx-auto w-full max-w-[72rem] px-6 pt-6 pb-12">
+    <section v-else-if="state === 'ready' && info" class="mx-auto w-full max-w-[84rem] px-6 pb-14">
       <p class="sr-only">Your ledger is open.</p>
+      <YearSummary v-if="yearRows" :year="taxYear" :rows="yearRows" :selected-month="chartMonth" @month="showMonth" />
       <LedgerFilters
         v-model="filters" :categories="categories" :sources="sources" :payment-methods="paymentMethods"
         :shown="visibleRows.length" :voided-hidden="voidedHidden" @clear="clearFilters" />
-      <p v-if="listError" role="alert" class="pb-4 text-ui">{{ listError }}</p>
-      <LedgerTable v-if="visibleRows.length > 0" :rows="visibleRows" :categories="categories" @goto="goTo" />
-      <div v-else-if="!listError" class="pt-8">
-        <p class="font-serif text-body">No entries match these filters.</p>
-        <button
-          type="button"
-          class="link mt-3"
-          @click="clearFilters"
-        >Clear all</button>
+      <div class="grid items-start gap-10 pt-1 xl:grid-cols-[minmax(0,1fr)_17.5rem]">
+        <div class="min-w-0">
+          <p v-if="listError" role="alert" class="pt-4 text-ui">{{ listError }}</p>
+          <LedgerTable v-if="visibleRows.length > 0" :rows="visibleRows" :categories="categories" @goto="goTo" />
+          <div v-else-if="!listError" class="pt-8">
+            <p class="font-serif text-body">No entries match these filters.</p>
+            <button
+              type="button"
+              class="link mt-3"
+              @click="clearFilters"
+            >Clear all</button>
+          </div>
+        </div>
+        <ScheduleCTally v-if="yearRows" class="xl:sticky xl:top-[5.25rem] xl:mt-5" :year="taxYear" :rows="yearRows" />
       </div>
     </section>
   </main>

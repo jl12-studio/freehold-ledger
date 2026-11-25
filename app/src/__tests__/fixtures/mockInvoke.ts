@@ -26,6 +26,12 @@ export function seedInvoke(cmd: string, args?: Args) {
   if (cmd === "list_payment_methods") {
     return Promise.resolve(paymentMethods.filter((p) => p.business_id === args!.businessId));
   }
+  if (cmd === "year_entries") {
+    const prefix = `${args!.year}-`;
+    return Promise.resolve(
+      seedTransactions.filter((t) => t.business_id === args!.businessId && t.occurred_on.startsWith(prefix) && !t.void),
+    );
+  }
   if (cmd === "list_transactions") {
     const f = args!.filter!;
     return Promise.resolve(

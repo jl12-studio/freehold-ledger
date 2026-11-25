@@ -40,7 +40,7 @@ const items = computed<Item[]>(() => {
 </script>
 
 <template>
-  <p class="flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-muted">
+  <p class="note flex flex-wrap gap-x-3 gap-y-0.5">
     <template v-for="(item, i) in items" :key="item.key">
       <span v-if="i > 0" aria-hidden="true">·</span>
       <button v-if="item.kind === 'goto'" type="button" class="link text-caption" @click="emit('goto', item.id)">{{ item.text }}</button>

@@ -142,6 +142,11 @@ export function listTransactions(filter: Filter): Promise<Transaction[]> {
   return invoke<Transaction[]>("list_transactions", { filter });
 }
 
+/** One business's live (not voided) entries dated in one calendar year, for the year summary. */
+export function listYearEntries(businessId: number, year: number): Promise<Transaction[]> {
+  return invoke<Transaction[]>("year_entries", { businessId, year });
+}
+
 export function listCategories(): Promise<Category[]> {
   return invoke<Category[]>("list_categories");
 }

@@ -88,7 +88,7 @@ describe("Ledger filters", () => {
     expect(fieldset.get("legend").text()).toBe("Type");
     const radios = fieldset.findAll("input[type='radio']");
     expect(radios).toHaveLength(3);
-    expect(fieldset.findAll("label").map((l) => l.text())).toEqual(["All", "Expenses", "Income"]);
+    expect(fieldset.findAll("label").map((l) => l.text())).toEqual(["All", "Paid out", "Received"]);
     expect(new Set(radios.map((r) => r.attributes("name"))).size).toBe(1);
 
     await radios[2].setValue(true);
