@@ -82,3 +82,19 @@ fn release_script_ships_the_disk_image_of_the_version_it_built() {
     assert!(script.contains(r#"DMG="$BUNDLE_DIR/dmg/Freehold Ledger_${VERSION}_universal.dmg""#), "release.sh does not pick the disk image by version");
     assert!(!script.contains("-name '*.dmg'"), "release.sh still picks any disk image");
 }
+
+#[test]
+fn agent_guide_keeps_hub_backup_rules_out_of_the_ledger() {
+    let guide = repo_file("docs/AGENT-GUIDE.md");
+    let section = guide
+        .split("## Freehold skills")
+        .nth(1)
+        .expect("AGENT-GUIDE.md has a Freehold skills section")
+        .split("\n## ")
+        .next()
+        .unwrap();
+    assert!(section.contains("freehold-skills/tree/v"), "the skills link must pin a tagged version");
+    assert!(!section.contains("backup rules apply"), "freehold-admin's hub backup rules must not be applied wholesale to the Ledger");
+    assert!(section.contains("don't apply here"), "the section must say the hub schedule, encryption and pruning rules don't apply");
+    assert!(section.contains("never delete the person's backups"), "the section must forbid pruning backups");
+}

@@ -121,6 +121,32 @@ A message starting "Please connect yourself to Freehold Ledger" comes from the a
 4. Read the server instructions and the tool list in this guide before recording anything.
 5. Never ask for a full card or account number. The ledger keeps only the last 4 digits.
 
+## Freehold skills
+
+This app follows the Freehold skills, version 0.1.0: https://github.com/jl12-studio/freehold-skills/tree/v0.1.0. They hold the know-how every Freehold app shares (the standard and its grades, building sync, deploying to the person's own server, keys, backups). This guide covers what's specific to the Ledger. Where the two differ, this guide wins for the Ledger.
+
+**Where the Ledger stands: Desktop grade.** One Mac, one SQLite file, a stdio MCP server, nothing listening on the network. There is no server mode, no sync, no web portal and no phone install yet.
+
+When the person asks for sync, the cloud or their phone ("put my books on my phone", "sync this to my laptop"):
+
+1. Tell them plainly: the Ledger runs on this one Mac today. Syncing to other devices comes with the Cloud grade, which isn't built yet.
+2. Don't fake it. Never move the ledger file into iCloud Drive, Dropbox, Google Drive or any other synced folder, and never point `FREEHOLD_LEDGER_DB` at one. A SQLite file synced while it's open can be corrupted, and it puts a middleman back in. The freehold-builder skill explains why.
+3. Offer what works now: `backup_ledger` with a `folder` on a USB drive or another disk they own, so a copy lives off this computer. That is the off-computer copy from the freehold-admin skill. Its schedule, encryption and pruning rules are for a hub and don't apply here: back up when this guide says to, and never delete the person's backups.
+4. If they want the feature, offer to open an issue at https://github.com/jl12-studio/freehold-ledger/issues.
+
+Facts the skills need about this app:
+
+| | |
+| --- | --- |
+| Grade | Desktop (rung 1 of 4), see `FREEHOLD.md` |
+| Release targets | macOS only: `Freehold-Ledger-universal.dmg` with `SHA256SUMS`, from the releases page |
+| MCP | stdio only: `Freehold Ledger.app/Contents/MacOS/ledger-mcp`, no arguments |
+| Network | none: no port, no remote MCP, no sync API |
+| Data | one SQLite file, default `~/Library/Application Support/org.freeholders.ledger/ledger.sqlite3`, or `FREEHOLD_LEDGER_DB` |
+| Backups | `backups` folder beside the ledger file, or a `folder` the person names |
+| Admin tools | `backup_ledger`, `verify_ledger`, `list_backups`, `restore_ledger`, `ledger_info` |
+| Conflict story | one file, one computer, append-only: nothing to merge (`DATA-MODEL.md`, "Conflict story") |
+
 ## Troubleshooting
 
 - **"Not a Freehold ledger"**: the file at the path is not a Freehold Ledger database. Nothing was changed. Check the path, or point `FREEHOLD_LEDGER_DB` at the right file.

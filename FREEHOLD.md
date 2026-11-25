@@ -80,3 +80,5 @@ Check: `10-teaches.sh`
 | Cloud (rung 2) | The ledger on a server the person owns, deployed by their agent, with other devices as clients of it | 2 and 4, and extends 7 to authenticated, encrypted remote access |
 | Web portal (rung 3) | A browser screen onto the person's own Cloud ledger | Adds reach, no new points |
 | Phone install (rung 4) | The portal installed on a phone as a PWA | Adds reach, no new points |
+
+Rungs 2 to 4 will be built and deployed with the shared Freehold skills (https://github.com/jl12-studio/freehold-skills, pinned to a tagged version): freehold-builder for the hub, sync, portal and PWA, and freehold-deploy and freehold-security for putting the hub on a server the person owns. Until then, `docs/AGENT-GUIDE.md` ("Freehold skills") says what the agent tells a person who asks for sync.

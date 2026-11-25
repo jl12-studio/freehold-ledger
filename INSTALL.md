@@ -95,6 +95,10 @@ For other agents, delete the `freehold-ledger` entry from their MCP settings.
 
 The ledger file and any backups are not removed. They belong to the person and stay where they are. By default the ledger is `~/Library/Application Support/org.freeholders.ledger/ledger.sqlite3`.
 
+## Sync, the cloud and phones
+
+Freehold Ledger is at the Desktop grade: one Mac, one file, nothing on the network. It has no server mode yet, so it can't sync to another computer or a phone. If the person asks for that, follow "Freehold skills" in `docs/AGENT-GUIDE.md`.
+
 ## Build it yourself
 
 The source is at https://github.com/jl12-studio/freehold-ledger.
