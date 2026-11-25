@@ -62,7 +62,7 @@ The four backup tools work on the whole ledger file, not one business, and take 
 - **How to restore.** Only when the person asks. Call `list_backups`, agree which file, then call `restore_ledger` with its `path` and a short `reason`. Later calls on the same connection read the restored books straight away.
 - **A restore always saves the current books first.** The result's `safety_backup` is that copy. To undo a restore, restore that file. If `safety_backup_problems` lists problems, the books were already damaged before the restore: that copy is kept for safekeeping but cannot be restored.
 - **Paths are full paths.** `folder` and `path` must start with `/`; a relative path is refused and nothing is written.
-- A restore that is refused (not a ledger, a file from a newer app, a missing reason) says "Nothing was changed."
+- A restore that is refused (not a ledger, a backup from a newer app, a missing reason) says "Nothing was changed." `restore_ledger` also works when a newer app has already opened the books and every other tool refuses; that is the way back after an upgrade.
 
 ## Upgrading the app
 
@@ -74,11 +74,16 @@ When the person says "update Freehold Ledger", do these steps in order. The app 
 4. Ask the person to quit Freehold Ledger.
 5. Install the new version by following `INSTALL.md`.
 6. Reconnect, call `verify_ledger`, then `ledger_info`. Tell the person the new version and that the entry count matches the backup from step 3.
-7. If anything is wrong, reinstall the previous version from the releases page and call `restore_ledger` with the backup from step 3.
+7. If anything is wrong, go back:
+   1. Reinstall the previous version from the releases page by following `INSTALL.md`, then reconnect.
+   2. If the new version raised the file format, the older `ledger-mcp` cannot open the books and says so: they "were opened by a newer Freehold Ledger". That is expected. It still serves four tools, and these are the ones to use: `ledger_info` (it reports `newer_version: true`), `list_backups`, `verify_ledger` with a `path`, and `restore_ledger`. Every other tool refuses and changes nothing.
+   3. Call `list_backups` and pick the backup from step 3 (same `path`, same entry count). Call `verify_ledger` with that `path`.
+   4. Call `restore_ledger` with that `path` and a `reason`. The newer file is saved first as a safety copy, kept exactly as it was. The other tools work again on the next call, with no restart. Call `ledger_info` and tell the person the entry count matches the backup.
+   5. To go forward again later, install the newer version and restore the safety copy it names.
 
 ### Staying on a version
 
-Nothing forces an upgrade. Any version keeps opening its own ledger forever. Only a file that a newer version has already opened is refused by an older one, and the refusal changes nothing.
+Nothing forces an upgrade. Any version keeps opening its own ledger forever. Only a file that a newer version has already opened is refused by an older one, and the refusal changes nothing. The way back from that is the rollback in step 7 above.
 
 ## Connection
 
@@ -119,6 +124,6 @@ A message starting "Please connect yourself to Freehold Ledger" comes from the a
 ## Troubleshooting
 
 - **"Not a Freehold ledger"**: the file at the path is not a Freehold Ledger database. Nothing was changed. Check the path, or point `FREEHOLD_LEDGER_DB` at the right file.
-- **"Created by a newer Freehold Ledger"**: the file was made by a newer version than this app supports. Ask the person to update the app. Nothing was changed.
+- **"These books were opened by a newer Freehold Ledger"**: the file was made by a newer version than this one supports. Nothing was changed. To go forward, install the newer version. To go back, call `list_backups` and then `restore_ledger` with the backup taken before the upgrade (see "Upgrading the app", step 7). Only `ledger_info`, `list_backups`, `verify_ledger` with a `path` and `restore_ledger` work until then.
 - **Wrong or empty books**: `ledger_info` shows which file is open. If it is not the file the person expects, `FREEHOLD_LEDGER_DB` is set (or unset) somewhere it should not be.
 - **Server will not start**: confirm the path in your config exists and is the one the app's panel shows. After moving the app, update the path.

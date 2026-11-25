@@ -1353,3 +1353,146 @@ async fn admin_relative_paths_are_refused_and_nothing_is_written() {
     assert_eq!(listed_descriptions(&client).await, vec!["Kept"]);
     client.cancel().await.ok();
 }
+
+// Rollback after a format change. A newer version raised the file format; this older server cannot
+// open the ledger, yet it must still serve the admin tools so the pre-upgrade backup can be
+// restored, and every other tool must refuse without touching the file.
+
+/// Make `file` look like a newer version's: the stored file format is raised by one digit. The
+/// value is the text "4" right after its key, so a same-length byte edit is a valid file. The
+/// file must not be open anywhere (so it holds no write-ahead log).
+fn raise_file_format(file: &Path) {
+    let mut bytes = std::fs::read(file).unwrap();
+    let key = b"schema_version";
+    let at = bytes
+        .windows(key.len() + 1)
+        .position(|w| &w[..key.len()] == key && w[key.len()] == b'4')
+        .expect("the stored file format is in the file");
+    bytes[at + key.len()] = b'5';
+    std::fs::write(file, bytes).unwrap();
+}
+
+/// A ledger as the person has it after upgrading: a backup taken before the upgrade (3 entries),
+/// two more entries after it, then the newer version's format. Returns (ledger, backup).
+fn upgraded_ledger(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let db = dir.join("ledger.sqlite3");
+    let mut l = ledger_core::Ledger::open(&db).unwrap();
+    for i in 0..5 {
+        l.record_expense(ledger_core::NewExpense {
+            occurred_on: None,
+            amount_cents: 1000,
+            description: format!("entry {i}"),
+            category: "supplies".into(),
+            is_asset: false,
+            payment_method: None,
+        })
+        .unwrap();
+        if i == 2 {
+            l.backup_to(None).unwrap();
+        }
+    }
+    let backup = l.list_backups(None).unwrap().remove(0).path;
+    drop(l);
+    raise_file_format(&db);
+    (db, backup)
+}
+
+#[tokio::test]
+async fn admin_newer_ledger_refuses_every_other_tool_and_the_file_is_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db, _backup) = upgraded_ledger(dir.path());
+    let before = std::fs::read(&db).unwrap();
+    let client = spawn_server(&db).await;
+
+    for (tool, args) in [
+        ("record_expense", json!({ "amount": "1", "description": "x", "category": "supplies" })),
+        ("list_transactions", json!({})),
+        ("list_businesses", json!({})),
+        ("summarize", json!({ "period": "this_month" })),
+        ("backup_ledger", json!({})),
+        ("verify_ledger", json!({})),
+    ] {
+        let r = call(&client, tool, args).await;
+        assert!(is_error(&r), "{tool}");
+        let t = text(&r);
+        assert!(t.contains("newer Freehold Ledger"), "{tool}: {t}");
+        assert!(t.contains("restore_ledger") && t.contains("reinstall"), "{tool}: {t}");
+        assert!(t.ends_with("Nothing was changed."), "{tool}: {t}");
+    }
+    client.cancel().await.ok();
+    assert_eq!(std::fs::read(&db).unwrap(), before, "the newer file must be byte for byte as it was");
+}
+
+#[tokio::test]
+async fn admin_newer_ledger_still_lists_backups_checks_one_and_reports_in_ledger_info() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db, backup) = upgraded_ledger(dir.path());
+    let client = spawn_server(&db).await;
+
+    let l = ok_json(&call(&client, "list_backups", json!({})).await);
+    assert_eq!(l["backups"].as_array().unwrap().len(), 1);
+    assert_eq!(l["backups"][0]["path"], backup.to_str().unwrap());
+    assert_eq!(l["backups"][0]["transaction_count"], 3);
+
+    let v = ok_json(&call(&client, "verify_ledger", json!({ "path": backup.to_str().unwrap() })).await);
+    assert_eq!(v["ok"], true);
+
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert_eq!(info["newer_version"], true);
+    assert_eq!(info["schema_version"], 5);
+    assert_eq!(info["supported_schema"], 4);
+    assert_eq!(info["app_version"], ledger_core::app_version());
+    assert!(note(&info).contains("newer Freehold Ledger") && note(&info).contains("restore_ledger"), "{}", note(&info));
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_newer_ledger_restore_goes_back_and_normal_tools_work_in_the_same_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db, backup) = upgraded_ledger(dir.path());
+    let client = spawn_server(&db).await;
+    assert!(is_error(&call(&client, "list_transactions", json!({})).await));
+
+    let v = ok_json(&call(&client, "restore_ledger", json!({ "path": backup.to_str().unwrap(), "reason": "going back after the upgrade" })).await);
+    assert_eq!(v["transaction_count"], 3);
+    assert_eq!(v["schema_version"], 4);
+    assert_eq!(v["safety_backup"]["schema_version"], 5);
+    assert_eq!(v["safety_backup"]["transaction_count"], 5);
+    assert_eq!(v["safety_backup_problems"], json!([]));
+    let safety = std::path::PathBuf::from(v["safety_backup"]["path"].as_str().unwrap());
+    assert!(safety.is_file());
+    let n = note(&v);
+    assert!(n.contains("Your books are now as they were in") && n.contains(safety.to_str().unwrap()), "{n}");
+    assert!(n.contains("newer Freehold Ledger"), "the note says what the kept copy is: {n}");
+
+    // Same server process, no restart.
+    let mut got = listed_descriptions(&client).await;
+    got.sort();
+    assert_eq!(got, vec!["entry 0", "entry 1", "entry 2"]);
+    let info = ok_json(&call(&client, "ledger_info", json!({})).await);
+    assert!(info.get("newer_version").is_none(), "{info}");
+    assert_eq!(info["schema_version"], 4);
+    expense(&client, "After rollback").await;
+    assert_eq!(listed_descriptions(&client).await.len(), 4);
+    client.cancel().await.ok();
+}
+
+#[tokio::test]
+async fn admin_newer_ledger_refuses_a_newer_backup_and_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db, backup) = upgraded_ledger(dir.path());
+    let newer_backup = dir.path().join("from-the-future.sqlite3");
+    std::fs::copy(&backup, &newer_backup).unwrap();
+    raise_file_format(&newer_backup);
+    let before = std::fs::read(&db).unwrap();
+    let client = spawn_server(&db).await;
+
+    let r = call(&client, "restore_ledger", json!({ "path": newer_backup.to_str().unwrap(), "reason": "try" })).await;
+    assert!(is_error(&r));
+    assert!(text(&r).contains("newer Freehold Ledger") && text(&r).ends_with("Nothing was changed."), "{}", text(&r));
+    // Still in the newer state: the other tools still refuse.
+    assert!(is_error(&call(&client, "list_transactions", json!({})).await));
+    client.cancel().await.ok();
+    assert_eq!(std::fs::read(&db).unwrap(), before);
+    assert_eq!(std::fs::read_dir(dir.path().join("backups")).unwrap().count(), 1, "no safety copy for a refused restore");
+}

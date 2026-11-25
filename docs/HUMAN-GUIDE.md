@@ -65,6 +65,8 @@ Say: update Freehold Ledger. Your agent checks for a newer version, saves a back
 
 Staying on the version you have is always fine. It keeps working with your ledger as it is.
 
+If the new version does not work out, say: go back to the previous version. Your agent reinstalls the old version and restores the backup it took before the update. The old version cannot read books the new version has already changed, so it will say so and use only the backup tools: that is expected. Your agent first saves what is there now, so nothing is lost, and anything you recorded after the update is in that saved copy, not in the restored books.
+
 ## Things to say to your agent
 
 - "I just bought a $1,200 laptop for work today." (It will treat this as equipment you keep over a year.)

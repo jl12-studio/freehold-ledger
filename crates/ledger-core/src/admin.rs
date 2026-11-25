@@ -74,41 +74,7 @@ impl Ledger {
 
     /// Copy the open ledger to a new, uniquely named file in `folder`. The copy is not checked.
     fn write_backup(&self, folder: Option<&Path>, schema: u32) -> Result<(PathBuf, DateTime<Local>), LedgerError> {
-        let folder = self.backup_folder(folder);
-        std::fs::create_dir_all(&folder)?;
-        let now = Local::now();
-        let stem = format!("ledger-{}-schema{schema}", now.format("%Y-%m-%d-%H%M%S"));
-        let mut path = folder.join(format!("{stem}.sqlite3"));
-        let mut n = 2;
-        while path.exists() {
-            path = folder.join(format!("{stem}-{n}.sqlite3"));
-            n += 1;
-        }
-        if let Err(e) = write_copy(self.conn(), &path) {
-            let _ = std::fs::remove_file(&path);
-            return Err(e);
-        }
-        Ok((path, now))
-    }
-
-    /// The copy of the current books taken before a restore. It is kept even when the current
-    /// books fail their check: it is then the only copy of them, and refusing would block the
-    /// very restore that verify_ledger recommends. Its problems are returned beside it.
-    fn safety_copy(&self) -> Result<(BackupInfo, Vec<String>), LedgerError> {
-        let schema = verify_conn(self.conn(), self.path()).map(|r| r.schema_version).unwrap_or(SUPPORTED_SCHEMA);
-        let (path, now) = self.write_backup(None, schema)?;
-        let (schema_version, transaction_count, problems) = match Ledger::verify_file(&path) {
-            Ok(r) => (r.schema_version, r.transaction_count, r.problems),
-            Err(e) => (schema, 0, vec![e.to_string()]),
-        };
-        let info = BackupInfo {
-            bytes: std::fs::metadata(&path)?.len(),
-            path,
-            schema_version,
-            transaction_count,
-            created_at: now.to_rfc3339(),
-        };
-        Ok((info, problems))
+        write_backup_of(self.conn(), self.path(), folder, schema)
     }
 
     /// Check the open ledger's integrity. Problems are reported, not returned as `Err`.
@@ -133,12 +99,17 @@ impl Ledger {
     /// Backups in `folder` (default: `backups/` beside the ledger), newest first. Files that are
     /// not readable ledgers are skipped.
     pub fn list_backups(&self, folder: Option<&Path>) -> Result<Vec<BackupInfo>, LedgerError> {
-        let folder = self.backup_folder(folder);
+        Ledger::list_backups_in(&self.backup_folder(folder))
+    }
+
+    /// Backups in `folder`, newest first, without opening any ledger. Files that are not readable
+    /// ledgers are skipped; a folder that does not exist holds none.
+    pub fn list_backups_in(folder: &Path) -> Result<Vec<BackupInfo>, LedgerError> {
         if !folder.is_dir() {
             return Ok(Vec::new());
         }
         let mut found = Vec::new();
-        for entry in std::fs::read_dir(&folder)? {
+        for entry in std::fs::read_dir(folder)? {
             let path = entry?.path();
             if path.extension().and_then(|e| e.to_str()) != Some("sqlite3") {
                 continue;
@@ -164,63 +135,148 @@ impl Ledger {
         Ok(found.into_iter().map(|(_, b)| b).collect())
     }
 
+    /// Where backups go by default for the ledger at `ledger`: a `backups` folder beside it.
+    pub fn default_backup_folder(ledger: &Path) -> PathBuf {
+        ledger_dir_of(ledger).join("backups")
+    }
+
     /// Replace the ledger's contents with a backup, after taking a safety backup of the current
     /// state. The backup is first copied aside, upgraded and checked, so the live books change in
     /// one step or not at all. Other open connections see the restored data on their next read.
     pub fn restore_from(&mut self, backup: &Path) -> Result<RestoreInfo, LedgerError> {
-        let refuse = |reason: String| LedgerError::RestoreRefused { reason };
-        if let (Ok(a), Ok(b)) = (backup.canonicalize(), self.path().canonicalize()) {
-            if a == b {
-                return Err(refuse("That file is the open ledger itself.".into()));
-            }
-        }
-        let report = Ledger::verify_file(backup)?;
-        if report.schema_version > report.supported_schema {
-            return Err(refuse(format!(
-                "That file was made by a newer Freehold Ledger (schema {}; this app supports up to {}).",
-                report.schema_version, report.supported_schema
-            )));
-        }
-        if !report.ok {
-            return Err(refuse(format!("That file failed its check: {}.", report.problems.join("; "))));
-        }
-
-        let staging = self.ledger_dir().join(format!(".ledger-restore-{}.tmp", std::process::id()));
-        remove_staging(&staging);
-        let result = prepare_staging(backup, &staging).and_then(|(st, ready)| {
-            let (safety_backup, safety_problems) = self.safety_copy()?;
-            {
-                let b = Backup::new(&st, self.conn_mut())?;
-                run_backup(&b)?;
-            }
-            Ok((safety_backup, safety_problems, ready))
-        });
-        remove_staging(&staging);
-        let (safety_backup, safety_backup_problems, ready) = result?;
-        Ok(RestoreInfo {
-            restored_from: backup.to_path_buf(),
-            safety_backup,
-            safety_backup_problems,
-            schema_version: ready.schema_version,
-            transaction_count: ready.transaction_count,
-        })
+        let path = self.path().to_path_buf();
+        restore_into(self.conn_mut(), &path, backup)
     }
 
-    fn ledger_dir(&self) -> PathBuf {
-        self.path()
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf()
+    /// The same restore for the ledger file at `ledger`, without opening it as a `Ledger`. This is
+    /// the way back when `Ledger::open` refuses the file because a newer version raised its format:
+    /// the file is only copied (the safety copy, a raw backup-API copy, is kept as it is) and then
+    /// overwritten by the checked backup, never migrated. The backup itself must be at or below
+    /// `SUPPORTED_SCHEMA`. The file must already exist and be a Freehold ledger.
+    pub fn restore_file(ledger: &Path, backup: &Path) -> Result<RestoreInfo, LedgerError> {
+        if !ledger.is_file() {
+            return Err(LedgerError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} does not exist", ledger.display()),
+            )));
+        }
+        let mut conn = Connection::open_with_flags(ledger, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|e| map_open(e, ledger))?;
+        conn.busy_timeout(Duration::from_millis(5000))?;
+        // Refuses a file that is not a ledger before anything is copied or written.
+        verify_conn(&conn, ledger)?;
+        restore_into(&mut conn, ledger, backup)
     }
 
     fn backup_folder(&self, folder: Option<&Path>) -> PathBuf {
         match folder {
             Some(f) => f.to_path_buf(),
-            None => self.ledger_dir().join("backups"),
+            None => Ledger::default_backup_folder(self.path()),
         }
     }
 }
+
+fn ledger_dir_of(ledger: &Path) -> PathBuf {
+    ledger
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
+}
+
+/// Copy the ledger open on `conn` (the file at `ledger`) to a new, uniquely named file in `folder`
+/// (default: `backups/` beside the ledger). The copy is not checked.
+fn write_backup_of(
+    conn: &Connection,
+    ledger: &Path,
+    folder: Option<&Path>,
+    schema: u32,
+) -> Result<(PathBuf, DateTime<Local>), LedgerError> {
+    let folder = match folder {
+        Some(f) => f.to_path_buf(),
+        None => Ledger::default_backup_folder(ledger),
+    };
+    std::fs::create_dir_all(&folder)?;
+    let now = Local::now();
+    let stem = format!("ledger-{}-schema{schema}", now.format("%Y-%m-%d-%H%M%S"));
+    let mut path = folder.join(format!("{stem}.sqlite3"));
+    let mut n = 2;
+    while path.exists() {
+        path = folder.join(format!("{stem}-{n}.sqlite3"));
+        n += 1;
+    }
+    if let Err(e) = write_copy(conn, &path) {
+        let _ = std::fs::remove_file(&path);
+        return Err(e);
+    }
+    Ok((path, now))
+}
+
+/// The copy of the current books taken before a restore. It is kept even when the current
+/// books fail their check: it is then the only copy of them, and refusing would block the
+/// very restore that verify_ledger recommends. Its problems are returned beside it. A file from a
+/// newer version is not damaged, so that alone is not a problem: the copy is kept as it is.
+fn safety_copy(conn: &Connection, ledger: &Path) -> Result<(BackupInfo, Vec<String>), LedgerError> {
+    let schema = verify_conn(conn, ledger).map(|r| r.schema_version).unwrap_or(SUPPORTED_SCHEMA);
+    let (path, now) = write_backup_of(conn, ledger, None, schema)?;
+    let (schema_version, transaction_count, problems) = match Ledger::verify_file(&path) {
+        Ok(r) => (r.schema_version, r.transaction_count, r.problems),
+        Err(e) => (schema, 0, vec![e.to_string()]),
+    };
+    let problems = problems.into_iter().filter(|p| !p.starts_with(NEWER_PROBLEM)).collect();
+    let info = BackupInfo {
+        bytes: std::fs::metadata(&path)?.len(),
+        path,
+        schema_version,
+        transaction_count,
+        created_at: now.to_rfc3339(),
+    };
+    Ok((info, problems))
+}
+
+/// Check `backup`, upgrade a private copy of it and check that, take a safety copy of the ledger
+/// open on `conn` (the file at `ledger`), then copy the upgraded backup over it in one step.
+fn restore_into(conn: &mut Connection, ledger: &Path, backup: &Path) -> Result<RestoreInfo, LedgerError> {
+    let refuse = |reason: String| LedgerError::RestoreRefused { reason };
+    if let (Ok(a), Ok(b)) = (backup.canonicalize(), ledger.canonicalize()) {
+        if a == b {
+            return Err(refuse("That file is the open ledger itself.".into()));
+        }
+    }
+    let report = Ledger::verify_file(backup)?;
+    if report.schema_version > report.supported_schema {
+        return Err(refuse(format!(
+            "That file was made by a newer Freehold Ledger (schema {}; this app supports up to {}).",
+            report.schema_version, report.supported_schema
+        )));
+    }
+    if !report.ok {
+        return Err(refuse(format!("That file failed its check: {}.", report.problems.join("; "))));
+    }
+
+    let staging = ledger_dir_of(ledger).join(format!(".ledger-restore-{}.tmp", std::process::id()));
+    remove_staging(&staging);
+    let result = prepare_staging(backup, &staging).and_then(|(st, ready)| {
+        let (safety_backup, safety_problems) = safety_copy(conn, ledger)?;
+        {
+            let b = Backup::new(&st, conn)?;
+            run_backup(&b)?;
+        }
+        Ok((safety_backup, safety_problems, ready))
+    });
+    remove_staging(&staging);
+    let (safety_backup, safety_backup_problems, ready) = result?;
+    Ok(RestoreInfo {
+        restored_from: backup.to_path_buf(),
+        safety_backup,
+        safety_backup_problems,
+        schema_version: ready.schema_version,
+        transaction_count: ready.transaction_count,
+    })
+}
+
+/// The start of the problem `verify_conn` reports for a file from a newer version.
+const NEWER_PROBLEM: &str = "made by a newer Freehold Ledger";
 
 fn run_backup(b: &Backup<'_, '_>) -> Result<(), LedgerError> {
     b.run_to_completion(PAGES_PER_STEP, Duration::from_millis(5), None)?;
@@ -329,7 +385,7 @@ fn verify_conn(conn: &Connection, path: &Path) -> Result<VerifyReport, LedgerErr
 
         if schema_version > SUPPORTED_SCHEMA {
             problems.push(format!(
-                "made by a newer Freehold Ledger (schema {schema_version}; this app supports up to {SUPPORTED_SCHEMA})"
+                "{NEWER_PROBLEM} (schema {schema_version}; this app supports up to {SUPPORTED_SCHEMA})"
             ));
         }
         let transaction_count = if table_exists(conn, "transactions")? {

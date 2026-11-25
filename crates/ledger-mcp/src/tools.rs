@@ -9,25 +9,67 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct LedgerTools {
-    /// The open ledger, or the plain-language reason it could not be opened.
-    ledger: Arc<Mutex<Result<Ledger, String>>>,
+    ledger: Arc<Mutex<Books>>,
+}
+
+/// What the server holds in place of the ledger.
+enum Books {
+    Open(Ledger),
+    /// The file was opened by a newer Freehold Ledger, so this version cannot open it. The server
+    /// keeps serving the admin tools, which work on the file's path, so the way back stays open.
+    Newer(NewerFile),
+    /// The ledger could not be opened for another reason; carries the `LedgerError` text.
+    Unavailable(String),
+}
+
+#[derive(Clone)]
+struct NewerFile {
+    path: PathBuf,
+    found: u32,
+    supported: u32,
 }
 
 impl LedgerTools {
-    pub fn new(ledger: Result<Ledger, String>) -> Self {
-        Self { ledger: Arc::new(Mutex::new(ledger)) }
+    /// `opened` is the result of opening the ledger at `path`.
+    pub fn new(path: PathBuf, opened: Result<Ledger, LedgerError>) -> Self {
+        let books = match opened {
+            Ok(l) => Books::Open(l),
+            Err(LedgerError::NewerSchema { found, supported }) => Books::Newer(NewerFile { path, found, supported }),
+            Err(e) => Books::Unavailable(e.to_string()),
+        };
+        Self { ledger: Arc::new(Mutex::new(books)) }
     }
 }
+
+/// Look again at a file that a newer version had opened: if it is now at a format this version can
+/// open (it was restored, from here or elsewhere), serve it again without a restart.
+fn refresh(books: &mut Books) {
+    let Books::Newer(n) = books else { return };
+    match Ledger::open(&n.path) {
+        Ok(l) => *books = Books::Open(l),
+        Err(LedgerError::NewerSchema { found, supported }) => {
+            n.found = found;
+            n.supported = supported;
+        }
+        Err(_) => {}
+    }
+}
+
+/// What to do about books a newer version opened, in the words the agent passes on.
+const NEWER_WAY_OUT: &str = "To go back, restore the backup taken before the upgrade: call list_backups, then restore_ledger with that backup's path and a reason. To go forward, reinstall the newer Freehold Ledger.";
 
 /// What can go wrong inside a tool. Every variant becomes an `isError: true` tool result.
 enum ToolError {
     Ledger(LedgerError),
     /// The ledger could not be opened at startup; carries the `LedgerError` text.
     Unavailable(String),
+    /// The books were opened by a newer Freehold Ledger; only the admin tools can act on them.
+    Newer(NewerFile),
     /// The input itself was unusable before the ledger was consulted.
     Input(String),
 }
@@ -43,6 +85,10 @@ impl ToolError {
         match self {
             ToolError::Ledger(e) => e.to_string(),
             ToolError::Unavailable(m) | ToolError::Input(m) => m.clone(),
+            ToolError::Newer(n) => format!(
+                "These books were opened by a newer Freehold Ledger (file format {}; this version supports up to {}), so this version cannot read them. {NEWER_WAY_OUT} Nothing was changed.",
+                n.found, n.supported
+            ),
         }
     }
 }
@@ -57,12 +103,28 @@ fn respond(r: ToolResult) -> CallToolResult {
 }
 
 impl LedgerTools {
+    /// Run `f` on the open ledger. When a newer version opened the file, refuse in plain words.
     fn with_ledger<T>(&self, f: impl FnOnce(&mut Ledger) -> Result<T, ToolError>) -> Result<T, ToolError> {
+        self.books(f, |n| Err(ToolError::Newer(n.clone())))
+    }
+
+    /// Run `open` on the open ledger, or `newer` on the file a newer version opened (the admin
+    /// tools, which work from its path). After `newer` the file is looked at again, so a restore
+    /// that brought it back to a format this version can open is served on the next call.
+    fn books<T>(
+        &self,
+        open: impl FnOnce(&mut Ledger) -> Result<T, ToolError>,
+        newer: impl FnOnce(&NewerFile) -> Result<T, ToolError>,
+    ) -> Result<T, ToolError> {
         let mut guard = self.ledger.lock().unwrap_or_else(|p| p.into_inner());
-        match &mut *guard {
-            Ok(l) => f(l),
-            Err(msg) => Err(ToolError::Unavailable(msg.clone())),
-        }
+        refresh(&mut guard);
+        let out = match &mut *guard {
+            Books::Open(l) => return open(l),
+            Books::Newer(n) => newer(n),
+            Books::Unavailable(msg) => Err(ToolError::Unavailable(msg.clone())),
+        };
+        refresh(&mut guard);
+        out
     }
 }
 
@@ -816,7 +878,7 @@ impl LedgerTools {
         annotations(read_only_hint = true)
     )]
     fn ledger_info(&self) -> CallToolResult {
-        respond(self.with_ledger(|l| {
+        respond(self.books(|l| {
             let info = l.info()?;
             let active = l.businesses(false)?;
             let current = l.current_business()?;
@@ -852,6 +914,21 @@ impl LedgerTools {
                 None => Value::Null,
             };
             Ok(with_note(v, note))
+        }, |n| {
+            let v = json!({
+                "path": n.path.display().to_string(),
+                "schema_version": n.found,
+                "supported_schema": n.supported,
+                "app_version": ledger_core::app_version(),
+                "newer_version": true,
+            });
+            Ok(with_note(
+                v,
+                format!(
+                    "This file is from a newer Freehold Ledger (file format {}; this version supports up to {}), so only list_backups, verify_ledger (with a path), restore_ledger and this call work. {NEWER_WAY_OUT}",
+                    n.found, n.supported
+                ),
+            ))
         }))
     }
 
@@ -1728,18 +1805,12 @@ impl LedgerTools {
         respond((|| {
             let i: ListBackupsInput = parse_args(args)?;
             let folder = i.folder.as_deref().map(|f| full_path("folder", f)).transpose()?;
-            let (backups, shown) = self.with_ledger(|l| {
-                let shown = match folder {
-                    Some(f) => f.to_path_buf(),
-                    None => l
-                        .path()
-                        .parent()
-                        .filter(|p| !p.as_os_str().is_empty())
-                        .unwrap_or_else(|| std::path::Path::new("."))
-                        .join("backups"),
-                };
-                Ok((l.list_backups(folder)?, shown))
-            })?;
+            let shown_for = |ledger: &Path| match folder {
+                Some(f) => f.to_path_buf(),
+                None => Ledger::default_backup_folder(ledger),
+            };
+            let listed = |shown: PathBuf| Ok((Ledger::list_backups_in(&shown)?, shown));
+            let (backups, shown) = self.books(|l| listed(shown_for(l.path())), |n| listed(shown_for(&n.path)))?;
             let n = backups.len();
             let note = if n == 0 {
                 format!("There are no backups in {} yet; backup_ledger makes one.", shown.display())
@@ -1751,7 +1822,7 @@ impl LedgerTools {
     }
 
     #[tool(
-        description = "Put the books back to a backup file. Use it only when the person asks to go back to a backup. It replaces all businesses' books with the backup's contents, after saving the current state first to a safety backup, so it can be undone by restoring that file. Needs a reason.",
+        description = "Put the books back to a backup file. Use it only when the person asks to go back to a backup. It replaces all businesses' books with the backup's contents, after saving the current state first to a safety backup, so it can be undone by restoring that file. Needs a reason. It also works when a newer Freehold Ledger has opened the books and every other tool refuses: that is how to go back after an upgrade.",
         input_schema = schema_for_input::<RestoreInput>().expect("schema")
     )]
     fn restore_ledger(&self, args: JsonObject) -> CallToolResult {
@@ -1766,8 +1837,11 @@ impl LedgerTools {
                 return Err(plain("A reason is needed to restore a backup.".into()));
             }
             let path = full_path("path", &i.path)?;
-            let r = self.with_ledger(|l| l.restore_from(path).map_err(|e| plain(e.to_string())))?;
-            let note = if r.safety_backup_problems.is_empty() {
+            let r = self.books(
+                |l| l.restore_from(path).map_err(|e| plain(e.to_string())),
+                |n| Ledger::restore_file(&n.path, path).map_err(|e| plain(e.to_string())),
+            )?;
+            let mut note = if r.safety_backup_problems.is_empty() {
                 format!(
                     "Your books are now as they were in {}. What was there a moment ago is saved at {}, so this can be undone by restoring that file.",
                     r.restored_from.display(),
@@ -1781,6 +1855,12 @@ impl LedgerTools {
                     r.safety_backup_problems.join("; ")
                 )
             };
+            if r.safety_backup.schema_version > ledger_core::SUPPORTED_SCHEMA {
+                note.push_str(&format!(
+                    " That saved copy is from a newer Freehold Ledger (file format {}), so this version cannot restore it. Reinstall the newer version to go forward again.",
+                    r.safety_backup.schema_version
+                ));
+            }
             Ok(with_note(serde_json::to_value(&r).expect("restore serializes"), note))
         })())
     }
@@ -1788,6 +1868,6 @@ impl LedgerTools {
 
 #[tool_handler(
     name = "freehold-ledger",
-    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call. Payment methods (cards, bank accounts, cash) are kept by nickname and last 4 digits only: never ask for, repeat, or send a full card or account number, expiry date or security code. One ledger file can hold several businesses, for example the real books and a test business. Every recording, list, summary, payment method and export works in one business: the current one, unless you pass business. Switch with switch_business only when the person asks (\"switch to my test business\"), and always tell the person which business you recorded into. Create, rename, mark as test, archive and restore businesses by conversation; nothing is ever deleted. Before an upgrade or a large import, back up the books with backup_ledger; check them with verify_ledger; restore with restore_ledger only when the person asks."
+    instructions = "Freehold Ledger is the person's own bookkeeping file for a small business: expenses and income, kept for tax time. Amounts are US dollars (for example \"300\" or \"300.50\"); dates are YYYY-MM-DD and default to today. Nothing is ever deleted: mistakes are voided or corrected, and the history stays. Act on the person's words: record or correct straight away using sensible defaults (today's date, the most likely category) and say what you chose, rather than asking questions first. When the person adds detail later (\"it's a laptop\"), fix the existing entry with correct_transaction instead of adding a new one. Call list_categories when unsure of a category. To import rows from a file or statement, use record_transactions, up to 50 rows per call. Payment methods (cards, bank accounts, cash) are kept by nickname and last 4 digits only: never ask for, repeat, or send a full card or account number, expiry date or security code. One ledger file can hold several businesses, for example the real books and a test business. Every recording, list, summary, payment method and export works in one business: the current one, unless you pass business. Switch with switch_business only when the person asks (\"switch to my test business\"), and always tell the person which business you recorded into. Create, rename, mark as test, archive and restore businesses by conversation; nothing is ever deleted. Before an upgrade or a large import, back up the books with backup_ledger; check them with verify_ledger; restore with restore_ledger only when the person asks. If a tool says the books were opened by a newer Freehold Ledger, only list_backups, verify_ledger (with a path), restore_ledger and ledger_info work; follow the way back the message gives."
 )]
 impl ServerHandler for LedgerTools {}
