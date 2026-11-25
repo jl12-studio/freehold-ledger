@@ -59,6 +59,12 @@ A JSON settings file with an "mcpServers" section, used by many apps (merge this
 }
 ```
 
+## Updating
+
+Say: update Freehold Ledger. Your agent checks for a newer version, saves a backup first, asks you to quit the app, installs the new version, and checks that every entry is still there.
+
+Staying on the version you have is always fine. It keeps working with your ledger as it is.
+
 ## Things to say to your agent
 
 - "I just bought a $1,200 laptop for work today." (It will treat this as equipment you keep over a year.)

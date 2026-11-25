@@ -138,7 +138,7 @@ The ledger is one file on one computer. The app window and the agent's `ledger-m
 
 ## 7. Versions
 
-The file is now schema 4; files from schema 1, 2 or 3 upgrade automatically when opened. A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely.
+The file is now schema 4; files from schema 1, 2 or 3 upgrade automatically when opened. A schema 1 file is upgraded automatically when it is opened, and its entries are unchanged. If an older copy of the app opens a file written by a newer one, it refuses and changes nothing, rather than risk damaging your books. Pinning an old version of the app keeps working safely. `crates/ledger-core/tests/upgrades.rs` proves this for every earlier schema.
 
 ## 8. What must never be lost
 

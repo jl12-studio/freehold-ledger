@@ -63,6 +63,22 @@ The four backup tools work on the whole ledger file, not one business, and take 
 - **A restore always saves the current books first.** The result's `safety_backup` is that copy. To undo a restore, restore that file.
 - A restore that is refused (not a ledger, a file from a newer app, a missing reason) says "Nothing was changed."
 
+## Upgrading the app
+
+When the person says "update Freehold Ledger", do these steps in order. The app never checks for updates or contacts the network itself; you do the upgrade.
+
+1. Call `ledger_info` and note `app_version`.
+2. Read the latest version from the releases page linked in `INSTALL.md`. If it is the same as `app_version`, tell the person they are already current and stop.
+3. Call `backup_ledger` and keep the result's `path` and the entry count.
+4. Ask the person to quit Freehold Ledger.
+5. Install the new version by following `INSTALL.md`.
+6. Reconnect, call `verify_ledger`, then `ledger_info`. Tell the person the new version and that the entry count matches the backup from step 3.
+7. If anything is wrong, reinstall the previous version from the releases page and call `restore_ledger` with the backup from step 3.
+
+### Staying on a version
+
+Nothing forces an upgrade. Any version keeps opening its own ledger forever. Only a file that a newer version has already opened is refused by an older one, and the refusal changes nothing.
+
 ## Connection
 
 Freehold Ledger ships a stdio server called `ledger-mcp`. Inside the installed app it lives at `Freehold Ledger.app/Contents/MacOS/ledger-mcp`. The app's "Connect your agent" panel shows the exact path on this computer and copies one message that tells an agent how to set itself up. The snippets below are what that message contains.
