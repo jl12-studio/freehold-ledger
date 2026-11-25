@@ -69,8 +69,9 @@ pnpm --dir app tauri build --target universal-apple-darwin --bundles app,dmg
 
 BUNDLE_DIR="$ROOT/target/universal-apple-darwin/release/bundle"
 APP="$BUNDLE_DIR/macos/Freehold Ledger.app"
-DMG="$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -name '*.dmg' | head -n 1)"
-if [[ ! -d "$APP" || -z "$DMG" ]]; then
+# Pick the disk image of this version by name: bundle/dmg keeps images from earlier builds.
+DMG="$BUNDLE_DIR/dmg/Freehold Ledger_${VERSION}_universal.dmg"
+if [[ ! -d "$APP" || ! -f "$DMG" ]]; then
   echo "release.sh: the build did not produce the app and disk image under $BUNDLE_DIR." >&2
   exit 1
 fi

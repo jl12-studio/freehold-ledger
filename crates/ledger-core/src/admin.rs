@@ -35,6 +35,9 @@ pub struct VerifyReport {
 pub struct RestoreInfo {
     pub restored_from: PathBuf,
     pub safety_backup: BackupInfo,
+    /// What the check found wrong with the books as they were before the restore; empty when
+    /// they were sound. A safety backup with problems is kept but cannot itself be restored.
+    pub safety_backup_problems: Vec<String>,
     pub schema_version: u32,
     pub transaction_count: i64,
 }
@@ -44,21 +47,8 @@ const PAGES_PER_STEP: std::os::raw::c_int = 256;
 impl Ledger {
     /// Write a verified copy of the ledger into `folder` (default: `backups/` beside the ledger).
     pub fn backup_to(&self, folder: Option<&Path>) -> Result<BackupInfo, LedgerError> {
-        let folder = self.backup_folder(folder);
-        std::fs::create_dir_all(&folder)?;
-        let now = Local::now();
         let schema = self.verify()?.schema_version;
-        let stem = format!("ledger-{}-schema{schema}", now.format("%Y-%m-%d-%H%M%S"));
-        let mut path = folder.join(format!("{stem}.sqlite3"));
-        let mut n = 2;
-        while path.exists() {
-            path = folder.join(format!("{stem}-{n}.sqlite3"));
-            n += 1;
-        }
-        if let Err(e) = write_copy(self.conn(), &path) {
-            let _ = std::fs::remove_file(&path);
-            return Err(e);
-        }
+        let (path, now) = self.write_backup(folder, schema)?;
         let report = match Ledger::verify_file(&path) {
             Ok(r) if r.ok => r,
             Ok(r) => {
@@ -80,6 +70,45 @@ impl Ledger {
             transaction_count: report.transaction_count,
             created_at: now.to_rfc3339(),
         })
+    }
+
+    /// Copy the open ledger to a new, uniquely named file in `folder`. The copy is not checked.
+    fn write_backup(&self, folder: Option<&Path>, schema: u32) -> Result<(PathBuf, DateTime<Local>), LedgerError> {
+        let folder = self.backup_folder(folder);
+        std::fs::create_dir_all(&folder)?;
+        let now = Local::now();
+        let stem = format!("ledger-{}-schema{schema}", now.format("%Y-%m-%d-%H%M%S"));
+        let mut path = folder.join(format!("{stem}.sqlite3"));
+        let mut n = 2;
+        while path.exists() {
+            path = folder.join(format!("{stem}-{n}.sqlite3"));
+            n += 1;
+        }
+        if let Err(e) = write_copy(self.conn(), &path) {
+            let _ = std::fs::remove_file(&path);
+            return Err(e);
+        }
+        Ok((path, now))
+    }
+
+    /// The copy of the current books taken before a restore. It is kept even when the current
+    /// books fail their check: it is then the only copy of them, and refusing would block the
+    /// very restore that verify_ledger recommends. Its problems are returned beside it.
+    fn safety_copy(&self) -> Result<(BackupInfo, Vec<String>), LedgerError> {
+        let schema = verify_conn(self.conn(), self.path()).map(|r| r.schema_version).unwrap_or(SUPPORTED_SCHEMA);
+        let (path, now) = self.write_backup(None, schema)?;
+        let (schema_version, transaction_count, problems) = match Ledger::verify_file(&path) {
+            Ok(r) => (r.schema_version, r.transaction_count, r.problems),
+            Err(e) => (schema, 0, vec![e.to_string()]),
+        };
+        let info = BackupInfo {
+            bytes: std::fs::metadata(&path)?.len(),
+            path,
+            schema_version,
+            transaction_count,
+            created_at: now.to_rfc3339(),
+        };
+        Ok((info, problems))
     }
 
     /// Check the open ledger's integrity. Problems are reported, not returned as `Err`.
@@ -136,7 +165,8 @@ impl Ledger {
     }
 
     /// Replace the ledger's contents with a backup, after taking a safety backup of the current
-    /// state. Other open connections see the restored data on their next read.
+    /// state. The backup is first copied aside, upgraded and checked, so the live books change in
+    /// one step or not at all. Other open connections see the restored data on their next read.
     pub fn restore_from(&mut self, backup: &Path) -> Result<RestoreInfo, LedgerError> {
         let refuse = |reason: String| LedgerError::RestoreRefused { reason };
         if let (Ok(a), Ok(b)) = (backup.canonicalize(), self.path().canonicalize()) {
@@ -155,34 +185,39 @@ impl Ledger {
             return Err(refuse(format!("That file failed its check: {}.", report.problems.join("; "))));
         }
 
-        let safety_backup = self.backup_to(None)?;
-
-        let src = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        src.busy_timeout(Duration::from_millis(5000))?;
-        {
-            let b = Backup::new(&src, self.conn_mut())?;
-            run_backup(&b)?;
-        }
-        let path = self.path().to_path_buf();
-        migrate(self.conn_mut(), &path)?;
-        let after = self.verify()?;
+        let staging = self.ledger_dir().join(format!(".ledger-restore-{}.tmp", std::process::id()));
+        remove_staging(&staging);
+        let result = prepare_staging(backup, &staging).and_then(|(st, ready)| {
+            let (safety_backup, safety_problems) = self.safety_copy()?;
+            {
+                let b = Backup::new(&st, self.conn_mut())?;
+                run_backup(&b)?;
+            }
+            Ok((safety_backup, safety_problems, ready))
+        });
+        remove_staging(&staging);
+        let (safety_backup, safety_backup_problems, ready) = result?;
         Ok(RestoreInfo {
             restored_from: backup.to_path_buf(),
             safety_backup,
-            schema_version: after.schema_version,
-            transaction_count: after.transaction_count,
+            safety_backup_problems,
+            schema_version: ready.schema_version,
+            transaction_count: ready.transaction_count,
         })
+    }
+
+    fn ledger_dir(&self) -> PathBuf {
+        self.path()
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
     }
 
     fn backup_folder(&self, folder: Option<&Path>) -> PathBuf {
         match folder {
             Some(f) => f.to_path_buf(),
-            None => self
-                .path()
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."))
-                .join("backups"),
+            None => self.ledger_dir().join("backups"),
         }
     }
 }
@@ -192,7 +227,7 @@ fn run_backup(b: &Backup<'_, '_>) -> Result<(), LedgerError> {
     Ok(())
 }
 
-fn write_copy(src: &Connection, dest: &Path) -> Result<(), LedgerError> {
+fn write_copy(src: &Connection, dest: &Path) -> Result<Connection, LedgerError> {
     let mut dst = Connection::open(dest)?;
     {
         let b = Backup::new(src, &mut dst)?;
@@ -200,7 +235,33 @@ fn write_copy(src: &Connection, dest: &Path) -> Result<(), LedgerError> {
     }
     // A backup is one self-contained file, not a write-ahead-log pair.
     dst.query_row("PRAGMA journal_mode=DELETE", [], |_| Ok(()))?;
-    Ok(())
+    Ok(dst)
+}
+
+/// Copy `backup` to `staging`, bring the copy up to this app's format and check it. Returns the
+/// open copy and its report. Nothing outside `staging` is written.
+fn prepare_staging(backup: &Path, staging: &Path) -> Result<(Connection, VerifyReport), LedgerError> {
+    let refuse = |reason: String| LedgerError::RestoreRefused { reason };
+    let src = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| map_open(e, backup))?;
+    src.busy_timeout(Duration::from_millis(5000))?;
+    let mut st = write_copy(&src, staging)?;
+    drop(src);
+    st.execute_batch("PRAGMA foreign_keys=ON;")?;
+    if let Err(e) = migrate(&mut st, backup) {
+        return Err(refuse(format!("That file could not be brought up to this app's format ({e}).")));
+    }
+    let ready = verify_conn(&st, backup)?;
+    if !ready.ok {
+        return Err(refuse(format!("That file failed its check after upgrading: {}.", ready.problems.join("; "))));
+    }
+    Ok((st, ready))
+}
+
+fn remove_staging(staging: &Path) {
+    let _ = std::fs::remove_file(staging);
+    let mut journal = staging.as_os_str().to_owned();
+    journal.push("-journal");
+    let _ = std::fs::remove_file(PathBuf::from(journal));
 }
 
 fn map_open(e: rusqlite::Error, path: &Path) -> LedgerError {

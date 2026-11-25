@@ -73,3 +73,12 @@ fn data_model_names_business_tables() {
         assert!(doc.contains(&format!("`{t}`")), "DATA-MODEL.md is missing {t}");
     }
 }
+
+/// bundle/dmg keeps disk images from earlier builds, so the release script must pick this
+/// version's image by name, never the first one it finds.
+#[test]
+fn release_script_ships_the_disk_image_of_the_version_it_built() {
+    let script = repo_file("scripts/release.sh");
+    assert!(script.contains(r#"DMG="$BUNDLE_DIR/dmg/Freehold Ledger_${VERSION}_universal.dmg""#), "release.sh does not pick the disk image by version");
+    assert!(!script.contains("-name '*.dmg'"), "release.sh still picks any disk image");
+}

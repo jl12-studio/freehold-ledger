@@ -1329,3 +1329,27 @@ async fn admin_ledger_info_reports_app_version_and_supported_schema() {
     assert_eq!(v["supported_schema"], 4);
     client.cancel().await.ok();
 }
+
+// A relative path would land wherever the server was started (a project folder, say), so every
+// admin tool refuses one and writes nothing.
+#[tokio::test]
+async fn admin_relative_paths_are_refused_and_nothing_is_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = spawn_server(&dir.path().join("ledger.sqlite3")).await;
+    expense(&client, "Kept").await;
+    let rel = "freehold-relative-backups";
+    for (tool, args) in [
+        ("backup_ledger", json!({ "folder": rel })),
+        ("list_backups", json!({ "folder": rel })),
+        ("verify_ledger", json!({ "path": "backups/some.sqlite3" })),
+        ("restore_ledger", json!({ "path": "backups/some.sqlite3", "reason": "try" })),
+    ] {
+        let r = call(&client, tool, args).await;
+        assert!(is_error(&r), "{tool}");
+        assert!(text(&r).contains("must be a full path") && text(&r).ends_with("Nothing was changed."), "{tool}: {}", text(&r));
+    }
+    assert!(!std::env::current_dir().unwrap().join(rel).exists());
+    assert!(!dir.path().join("backups").exists());
+    assert_eq!(listed_descriptions(&client).await, vec!["Kept"]);
+    client.cancel().await.ok();
+}

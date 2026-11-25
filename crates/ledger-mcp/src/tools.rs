@@ -535,6 +535,19 @@ struct RestoreInput {
     reason: String,
 }
 
+/// A path the agent passes must be a full path: a relative one would resolve against wherever the
+/// server was started, which can be a project folder that is later shared or published.
+fn full_path<'a>(field: &str, p: &'a str) -> Result<&'a std::path::Path, ToolError> {
+    let path = std::path::Path::new(p);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(ToolError::Input(format!(
+            "{field} must be a full path, such as /Users/you/Documents/Ledger backups. Nothing was changed."
+        )))
+    }
+}
+
 fn with_note(mut v: Value, note: impl Into<String>) -> Value {
     v["note"] = Value::String(note.into());
     v
@@ -1665,7 +1678,7 @@ impl LedgerTools {
     fn backup_ledger(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: BackupInput = parse_args(args)?;
-            let folder = i.folder.as_deref().map(std::path::Path::new);
+            let folder = i.folder.as_deref().map(|f| full_path("folder", f)).transpose()?;
             let b = self.with_ledger(|l| Ok(l.backup_to(folder)?))?;
             let note = format!(
                 "Your books were copied to {}. This copy holds everything: all businesses, entries and history. Keep a copy somewhere other than this computer too, such as a USB drive.",
@@ -1684,7 +1697,7 @@ impl LedgerTools {
         respond((|| {
             let i: VerifyInput = parse_args(args)?;
             let r = match i.path.as_deref() {
-                Some(p) => ledger_core::Ledger::verify_file(std::path::Path::new(p))?,
+                Some(p) => ledger_core::Ledger::verify_file(full_path("path", p)?)?,
                 None => self.with_ledger(|l| Ok(l.verify()?))?,
             };
             let note = if r.ok {
@@ -1714,7 +1727,7 @@ impl LedgerTools {
     fn list_backups(&self, args: JsonObject) -> CallToolResult {
         respond((|| {
             let i: ListBackupsInput = parse_args(args)?;
-            let folder = i.folder.as_deref().map(std::path::Path::new);
+            let folder = i.folder.as_deref().map(|f| full_path("folder", f)).transpose()?;
             let (backups, shown) = self.with_ledger(|l| {
                 let shown = match folder {
                     Some(f) => f.to_path_buf(),
@@ -1752,13 +1765,22 @@ impl LedgerTools {
             if i.reason.trim().is_empty() {
                 return Err(plain("A reason is needed to restore a backup.".into()));
             }
-            let r = self
-                .with_ledger(|l| l.restore_from(std::path::Path::new(&i.path)).map_err(|e| plain(e.to_string())))?;
-            let note = format!(
-                "Your books are now as they were in {}. What was there a moment ago is saved at {}, so this can be undone by restoring that file.",
-                r.restored_from.display(),
-                r.safety_backup.path.display()
-            );
+            let path = full_path("path", &i.path)?;
+            let r = self.with_ledger(|l| l.restore_from(path).map_err(|e| plain(e.to_string())))?;
+            let note = if r.safety_backup_problems.is_empty() {
+                format!(
+                    "Your books are now as they were in {}. What was there a moment ago is saved at {}, so this can be undone by restoring that file.",
+                    r.restored_from.display(),
+                    r.safety_backup.path.display()
+                )
+            } else {
+                format!(
+                    "Your books are now as they were in {}. What was there a moment ago is saved at {}. It had problems ({}), so it is kept for safekeeping but cannot be restored.",
+                    r.restored_from.display(),
+                    r.safety_backup.path.display(),
+                    r.safety_backup_problems.join("; ")
+                )
+            };
             Ok(with_note(serde_json::to_value(&r).expect("restore serializes"), note))
         })())
     }

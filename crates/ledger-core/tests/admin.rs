@@ -116,6 +116,7 @@ fn s_res_1_restore_returns_to_the_backup_and_keeps_a_safety_copy() {
     assert_eq!(r.transaction_count, 3);
     assert_eq!(r.safety_backup.transaction_count, 5);
     assert!(r.safety_backup.path.exists());
+    assert!(r.safety_backup_problems.is_empty(), "{:?}", r.safety_backup_problems);
     assert_eq!(l.info().unwrap().transaction_count, 3);
     assert_eq!(other.info().unwrap().transaction_count, 3);
     add(&mut other, 1);
@@ -161,4 +162,64 @@ fn s_res_4_the_open_ledger_itself_is_refused() {
     assert!(err.to_string().ends_with("Nothing was changed."));
     assert!(!dir.path().join("backups").exists());
     assert_eq!(l.info().unwrap().transaction_count, 2);
+}
+
+fn staging_leftovers(dir: &std::path::Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(".ledger-restore-"))
+        .collect()
+}
+
+// A file that passes its check but cannot be upgraded must not replace the books: the upgrade
+// happens on a private copy before the live file is touched.
+#[test]
+fn s_res_5_a_backup_that_cannot_be_upgraded_leaves_the_books_as_they_were() {
+    let (dir, mut l) = common::empty();
+    add(&mut l, 2);
+    let other = Ledger::open(l.path()).unwrap();
+    let bad = dir.path().join("old").join("broken-v3.sqlite3");
+    std::fs::create_dir_all(bad.parent().unwrap()).unwrap();
+    rusqlite::Connection::open(&bad)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO schema_meta (key, value) VALUES ('schema_version', '3');",
+        )
+        .unwrap();
+    assert!(Ledger::verify_file(&bad).unwrap().ok);
+
+    let err = l.restore_from(&bad).unwrap_err();
+    assert!(matches!(err, LedgerError::RestoreRefused { .. }), "{err:?}");
+    assert!(err.to_string().ends_with("Nothing was changed."), "{err}");
+    assert_eq!(l.info().unwrap().transaction_count, 2);
+    assert_eq!(l.info().unwrap().schema_version, SUPPORTED_SCHEMA);
+    assert!(l.verify().unwrap().ok);
+    assert_eq!(other.info().unwrap().transaction_count, 2);
+    assert!(staging_leftovers(dir.path()).is_empty(), "{:?}", staging_leftovers(dir.path()));
+}
+
+// verify_ledger tells the agent to restore when the books have problems, so a restore must not
+// be blocked by those problems. The broken books are kept as the safety backup.
+#[test]
+fn s_res_6_books_that_fail_their_check_can_still_be_restored_and_are_kept() {
+    let (dir, mut l) = common::empty();
+    add(&mut l, 2);
+    let good = l.backup_to(Some(&dir.path().join("good"))).unwrap();
+    add(&mut l, 1);
+    let c = rusqlite::Connection::open(l.path()).unwrap();
+    c.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+    c.execute("INSERT INTO transaction_businesses (transaction_id, business_id) VALUES (999, 1)", []).unwrap();
+    drop(c);
+    assert!(!l.verify().unwrap().ok);
+
+    let r = l.restore_from(&good.path).unwrap();
+    assert_eq!(r.transaction_count, 2);
+    assert!(r.safety_backup.path.is_file());
+    assert_eq!(r.safety_backup.transaction_count, 3);
+    assert!(r.safety_backup_problems.iter().any(|p| p.contains("foreign key")), "{:?}", r.safety_backup_problems);
+    assert_eq!(l.info().unwrap().transaction_count, 2);
+    assert!(l.verify().unwrap().ok);
+    assert!(staging_leftovers(dir.path()).is_empty());
 }

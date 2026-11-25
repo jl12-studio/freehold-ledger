@@ -60,7 +60,8 @@ The four backup tools work on the whole ledger file, not one business, and take 
 - **Where backups go.** Into a `backups` folder beside the ledger file, named by date and time. The result's `path` and `note` say exactly where. The note also reminds the person to keep a copy somewhere other than this computer, such as a USB drive; pass it on.
 - **Check first.** `verify_ledger` with a backup's `path` confirms the copy is sound. If the open ledger reports problems, tell the person not to record anything new and offer the most recent good backup.
 - **How to restore.** Only when the person asks. Call `list_backups`, agree which file, then call `restore_ledger` with its `path` and a short `reason`. Later calls on the same connection read the restored books straight away.
-- **A restore always saves the current books first.** The result's `safety_backup` is that copy. To undo a restore, restore that file.
+- **A restore always saves the current books first.** The result's `safety_backup` is that copy. To undo a restore, restore that file. If `safety_backup_problems` lists problems, the books were already damaged before the restore: that copy is kept for safekeeping but cannot be restored.
+- **Paths are full paths.** `folder` and `path` must start with `/`; a relative path is refused and nothing is written.
 - A restore that is refused (not a ledger, a file from a newer app, a missing reason) says "Nothing was changed."
 
 ## Upgrading the app
